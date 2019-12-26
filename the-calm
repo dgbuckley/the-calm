@@ -1,0 +1,25 @@
+#!/bin/env python3
+from dungeon import dungeon
+import random
+import time
+from curses import wrapper
+
+
+def main(stdscr):
+    d = dungeon(100, 50)
+    d.generate_floor()
+    d.spawn_player()
+
+    stdscr.clear()
+    while True:
+        if bool(random.getrandbits(1)):
+            d.stepx(random.randint(-1,1))
+        else:
+            d.stepy(random.randint(-1,1))
+
+        time.sleep(.1)
+        stdscr.erase()
+        stdscr.addstr(d.print())
+        stdscr.refresh()
+
+wrapper(main)

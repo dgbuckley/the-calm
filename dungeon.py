@@ -58,7 +58,6 @@ class dungeon:
             self.layout[y+j][x] = tile.WALL
             self.layout[y+j][x+x_len-1] = tile.WALL
 
-        print (x, y, x_len, y_len)
         return 1
 
     def generate_floor(self):
@@ -70,7 +69,6 @@ class dungeon:
             y = random.randrange(len(self.layout)-width)
             if self.generate_room(x, y, length, width):
                 fails = 0
-                print (1)
             else:
                 fails += 1
 
@@ -114,12 +112,22 @@ class dungeon:
                 out += "\n"
         return out
 
-m = dungeon(100, 50)
-m.generate_floor()
-m.spawn_player()
+    def stepx(self, d: int):
+        if d > 1:
+            d = 1
+        if d < -1:
+            d = -1
+        self._user._pos.x += d
 
-# for j in m.layout:
-#     print(j)
-#     print()
+        if not self._tile_is(tile.FLOOR, self._user._pos.x, self._user._pos.y):
+            self._user._pos.x -= d
 
-print(m.print())
+    def stepy(self, d: int):
+        if d > 1:
+            d = 1
+        if d < -1:
+            d = -1
+        self._user._pos.y += d
+
+        if not self._tile_is(tile.FLOOR, self._user._pos.x, self._user._pos.y):
+            self._user._pos.y -= d
