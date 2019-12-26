@@ -8,8 +8,16 @@ class tile(Enum):
     WALL = 2
     FLOOR = 3
 
+class pos:
+    x = -1
+    y = -1
+
+class player:
+    _pos = pos
 
 class dungeon:
+    _user = player
+
     walls = {
         0: " ",
         3: "│",
@@ -32,9 +40,9 @@ class dungeon:
     def __init__(self, x: int, y: int):
         self.layout = [[tile.NUL for rj in range(x)] for j in range(y)]
 
-    def _tile_is(tile, x: int, y: int):
-        return tile == layout[y][x]
-    
+    def _tile_is(self, tile, x: int, y: int):
+        return tile == self.layout[y][x]
+
     def generate_room(self, x, y, x_len, y_len):
         for j in range(x_len):
             for k in range(y_len):
@@ -49,7 +57,7 @@ class dungeon:
         for j in range(y_len):
             self.layout[y+j][x] = tile.WALL
             self.layout[y+j][x+x_len-1] = tile.WALL
-        
+
         print (x, y, x_len, y_len)
         return 1
 
@@ -67,7 +75,7 @@ class dungeon:
                 fails += 1
 
     # above = 3, right = 5, bottom = 7, left = 11
-    def find_wall_type(self, x: int, y: int):
+    def _find_wall_type(self, x: int, y: int):
         value = 0
         if self.layout[y][x] == tile.WALL:
             if y:
@@ -84,21 +92,31 @@ class dungeon:
                     value += 5
         return dungeon.walls[value]
 
+    def spawn_player(self):
+        t = tile.INVALID
+        while t != tile.FLOOR:
+            self._user._pos.x = random.randrange(0, len(self.layout[0]))
+            self._user._pos.y = random.randrange(0, len(self.layout))
+            t = self.layout[self._user._pos.y][self._user._pos.x]
+
     def print(self):
         out = ""
         for j, v in enumerate(self.layout):
             for i, t in enumerate(v):
+                if self._user._pos.x == i and self._user._pos.y == j:
+                    out += "X"
+                    continue
                 if t == tile.WALL:
-                    out += self.find_wall_type(i, j)
+                    out += self._find_wall_type(i, j)
                 else:
                     out += " "
             if j < len(self.layout) - 1:
                 out += "\n"
         return out
 
-
 m = dungeon(100, 50)
 m.generate_floor()
+m.spawn_player()
 
 # for j in m.layout:
 #     print(j)
