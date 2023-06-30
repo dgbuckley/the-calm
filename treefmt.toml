@@ -1,0 +1,6 @@
+# One CLI to format the code tree - https://github.com/numtide/treefmt
+
+[formatter.zig]
+command = "zig"
+options = ["fmt", "--stdio"]
+includes = ["*.zig"]
