@@ -24,7 +24,7 @@
       pkgs = pkgsFor.${system};
     in {
       default = pkgs.mkShell {
-        packages = with pkgs; [zig zls];
+        packages = with pkgs; [zig zls ncurses pkg-config];
 
         shellHook = ''
           echo "zig `${pkgs.zig}/bin/zig version`"
