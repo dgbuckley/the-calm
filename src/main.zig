@@ -65,34 +65,41 @@ const Hall = struct {
             //   │
             // ──┘
             UpLeft,
+
+            fn isEnterance(kind: Kind) bool {
+                switch (kind) {
+                    .EnterUp, .EnterDown, .EnterLeft, .EnterRight => return true,
+                    else => return false,
+                }
+            }
         };
     };
 
-    fn get_corner_type(from: Direction, to: Direction) Point.Kind {
-        switch (from) {
-            .Left => {
-                switch (to) {
+    fn get_corner_type(previous: Direction, current: Direction) Point.Kind {
+        switch (previous) {
+            .Right => {
+                switch (current) {
                     .Up => return .UpLeft,
                     .Down => return .DownLeft,
                     else => @panic("No Valid Corner"),
                 }
             },
-            .Right => {
-                switch (to) {
+            .Left => {
+                switch (current) {
                     .Up => return .UpRight,
                     .Down => return .DownRight,
                     else => @panic("No Valid Corner"),
                 }
             },
-            .Up => {
-                switch (to) {
+            .Down => {
+                switch (current) {
                     .Left => return .UpLeft,
                     .Right => return .UpRight,
                     else => @panic("No Valid Corner"),
                 }
             },
-            .Down => {
-                switch (to) {
+            .Up => {
+                switch (current) {
                     .Left => return .DownLeft,
                     .Right => return .DownRight,
                     else => @panic("No Valid Corner"),
@@ -114,20 +121,49 @@ const Hall = struct {
         const pos = segment.pos;
         switch (segment.kind) {
             .EnterUp => {
+                try win.printAt("│ │", .{}, pos.x - 1, pos.y + 1);
                 try win.printAt("┘ └", .{}, pos.x - 1, pos.y);
             },
             .EnterDown => {
                 try win.printAt("┐ ┌", .{}, pos.x - 1, pos.y);
+                try win.printAt("│ │", .{}, pos.x - 1, pos.y - 1);
             },
             .EnterLeft => {
-                try win.putAt(pos.x, pos.y + 1, '┘');
-                try win.putAt(pos.x, pos.y, ' ');
-                try win.putAt(pos.x, pos.y - 1, '┐');
+                try win.printAt("─┘", .{}, pos.x, pos.y + 1);
+                try win.printAt("  ", .{}, pos.x, pos.y);
+                try win.printAt("─┐", .{}, pos.x, pos.y - 1);
             },
             .EnterRight => {
-                try win.putAt(pos.x, pos.y + 1, '└');
-                try win.putAt(pos.x, pos.y, ' ');
-                try win.putAt(pos.x, pos.y - 1, '┌');
+                try win.printAt("└─", .{}, pos.x, pos.y + 1);
+                try win.printAt("  ", .{}, pos.x, pos.y);
+                try win.printAt("┌─", .{}, pos.x, pos.y - 1);
+            },
+            else => @panic("Invalid Enterance"),
+        }
+    }
+
+    fn draw_corner(segment: Hall.Point, win: *Window) !void {
+        const pos = segment.pos;
+        switch (segment.kind) {
+            .UpRight => {
+                try win.printAt("│ └", .{}, pos.x - 1, pos.y + 1);
+                try win.printAt("│  ", .{}, pos.x - 1, pos.y);
+                try win.printAt("└──", .{}, pos.x - 1, pos.y - 1);
+            },
+            .DownRight => {
+                try win.printAt("┌──", .{}, pos.x - 1, pos.y + 1);
+                try win.printAt("│  ", .{}, pos.x - 1, pos.y);
+                try win.printAt("│ ┌", .{}, pos.x - 1, pos.y - 1);
+            },
+            .UpLeft => {
+                try win.printAt("┘ │", .{}, pos.x - 1, pos.y + 1);
+                try win.printAt("  │", .{}, pos.x - 1, pos.y);
+                try win.printAt("──┘", .{}, pos.x - 1, pos.y - 1);
+            },
+            .DownLeft => {
+                try win.printAt("──┐", .{}, pos.x - 1, pos.y + 1);
+                try win.printAt("  │", .{}, pos.x - 1, pos.y);
+                try win.printAt("┐ │", .{}, pos.x - 1, pos.y - 1);
             },
             else => @panic("Invalid Enterance"),
         }
@@ -142,31 +178,28 @@ const Hall = struct {
         for (hall.segments.items[1..]) |segment| {
             if (prev.pos.x == segment.pos.x) {
                 // vertical
-                var y: isize = 1;
+                var y: isize = 2;
                 var height = std.math.absCast(prev.pos.y - segment.pos.y);
 
                 while (y < height - 1) : (y += 1) {
                     try win.printAt("│ │", .{}, prev.pos.x - 1, prev.pos.y + y);
-                    // try win.putAt(prev.pos.x - 1, prev.pos.y + y, '│');
-                    // try win.putAt(prev.pos.x, prev.pos.y + y, ' ');
-                    // try win.putAt(prev.pos.x + 1, prev.pos.y + y, '│');
                 }
             } else {
                 std.debug.assert(prev.pos.y == segment.pos.y);
                 // horizontal
-                var x = @min(prev.pos.x, segment.pos.x);
-                var width = std.math.absCast(prev.pos.x - segment.pos.x);
+                var x = @min(prev.pos.x, segment.pos.x) + 2;
+                var width = std.math.absCast(prev.pos.x - segment.pos.x) - 2;
 
-                try win.putN(x + 1, segment.pos.y + 1, '─', width - 1);
-                try win.putN(x + 1, segment.pos.y, ' ', width - 1);
-                try win.putN(x + 1, segment.pos.y - 1, '─', width - 1);
+                try win.putN(x, segment.pos.y + 1, '─', width - 1);
+                try win.putN(x, segment.pos.y, ' ', width - 1);
+                try win.putN(x, segment.pos.y - 1, '─', width - 1);
             }
 
             switch (segment.kind) {
                 .EnterUp, .EnterDown, .EnterLeft, .EnterRight => {
                     try draw_enterance(segment, win);
                 },
-                else => {},
+                else => try draw_corner(segment, win),
             }
             prev = segment;
         }
