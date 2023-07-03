@@ -25,6 +25,15 @@ const Direction = enum {
     Right,
     Up,
     Down,
+
+    fn opposite(dir: Direction) Direction {
+        switch (dir) {
+            .Left => return .Right,
+            .Right => return .Left,
+            .Up => return .Down,
+            .Down => return .Up,
+        }
+    }
 };
 
 const Hall = struct {
@@ -353,9 +362,9 @@ const Room = struct {
         }
     }
 
-    fn check_collision(room: *const Room, target: Pos) bool {
-        return (target.x > room.pos.x and target.x < room.pos.x + room.width) or
-            (target.y > room.pos.y and target.y < room.pos.y + room.height);
+    fn check_collision(room: *const Room, target: Pos, clearance: isize) bool {
+        return (target.x >= room.pos.x - clearance and target.x < room.pos.x + room.width + clearance) and
+            (target.y >= room.pos.y - clearance and target.y < room.pos.y + room.height + clearance);
     }
 
     fn join(from: *Room, ally: Allocator, to: *Room) !void {
@@ -372,13 +381,24 @@ const Room = struct {
 
         // TODO select a more random point on the wall
         // from_pos is the center of from_wall
-        const from_pos = Pos{
-            .x = @divFloor(from_wall.line.points[0].x + from_wall.line.points[1].x, @as(isize, 2)),
-            .y = @divFloor(from_wall.line.points[0].y + from_wall.line.points[1].y, @as(isize, 2)),
+        const from_pos = blk: {
+            var from_pos = Pos{
+                .x = @divFloor(from_wall.line.points[0].x + from_wall.line.points[1].x, @as(isize, 2)),
+                .y = @divFloor(from_wall.line.points[0].y + from_wall.line.points[1].y, @as(isize, 2)),
+            };
+
+            from_pos = step(from_pos, from_wall.direction, 2);
+
+            break :blk from_pos;
         };
-        const to_pos = Pos{
-            .x = @divFloor(to_wall.line.points[0].x + to_wall.line.points[1].x, @as(isize, 2)),
-            .y = @divFloor(to_wall.line.points[0].y + to_wall.line.points[1].y, @as(isize, 2)),
+
+        const to_pos = blk: {
+            var to_pos = Pos{
+                .x = @divFloor(to_wall.line.points[0].x + to_wall.line.points[1].x, @as(isize, 2)),
+                .y = @divFloor(to_wall.line.points[0].y + to_wall.line.points[1].y, @as(isize, 2)),
+            };
+            to_pos = step(to_pos, to_wall.direction, 2);
+            break :blk to_pos;
         };
 
         // path find
@@ -389,16 +409,16 @@ const Room = struct {
         hall.* = .{ .segments = .{} };
         try to.halls.append(ally, hall);
         try from.halls.append(ally, hall);
-        try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = from_pos });
+        try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = step(from_pos, from_wall.direction.opposite(), 2) });
 
         var current_pos = from_pos;
 
         var dir: Direction = from_wall.direction;
-        var previous_dir: Direction = dir;
+        var prev_dir: Direction = dir;
         var direction_weight = [4]f32{ 0, 0, 0, 0 };
 
         while (current_pos.x != to_pos.x or current_pos.y != to_pos.y) {
-            previous_dir = dir;
+            prev_dir = dir;
 
             // Weight each direction
             // Add one to each weight to allow prioritization of direction by decrease without risk of underflow
@@ -408,19 +428,21 @@ const Room = struct {
             direction_weight[@enumToInt(Direction.Down)] = @intToFloat(f32, manhattan_dist(to_pos, step(current_pos, .Down, 1)) + 1);
 
             // Slightly prioritize continuing in same direction for straighter lines
-            direction_weight[@enumToInt(previous_dir)] -= @as(f32, 0.5);
+            direction_weight[@enumToInt(prev_dir)] -= @as(f32, 0.5);
 
             // sorted directions by bring pos closest to goal
-            var closest_dir: [4]u32 = .{ 0, 0, 0, 0 };
+            var closest_dir: [3]u32 = .{ 0, 0, 0 };
             // Closest distances brought by step in closest_dir
-            var closest_dist: [4]f32 = .{ std.math.f32_max, std.math.f32_max, std.math.f32_max, std.math.f32_max };
+            var closest_dist: [3]f32 = .{ std.math.f32_max, std.math.f32_max, std.math.f32_max };
             var index: u32 = 0;
             while (index < 4) : (index += 1) {
                 var cur_dir: u32 = index;
                 var cur_dist = direction_weight[index];
                 var sortIndex: u32 = 0;
-                while (sortIndex < 4) : (sortIndex += 1) {
-                    if (cur_dist < closest_dist[sortIndex]) {
+                while (sortIndex < 3) : (sortIndex += 1) {
+                    if (cur_dist < closest_dist[sortIndex] and
+                        @intToEnum(Direction, cur_dir) != dir.opposite())
+                    {
                         var tmpi: u32 = closest_dir[sortIndex];
                         closest_dir[sortIndex] = cur_dir;
                         cur_dir = tmpi;
@@ -432,19 +454,23 @@ const Room = struct {
             }
             index = 0;
             var next_pos = current_pos;
-            while (index < 4) : (index += 1) {
+            while (index < 3) : (index += 1) {
                 dir = @intToEnum(Direction, closest_dir[index]);
                 next_pos = step(current_pos, dir, 1);
-                // if ((next_pos.x == to_pos.x and next_pos.y == to_pos.y) or false)
-                // !(from.check_collision(next_pos) or to.check_collision(next_pos)))
-                break;
+                if ((next_pos.x == to_pos.x and next_pos.y == to_pos.y) or
+                    !(from.check_collision(next_pos, 1) or to.check_collision(next_pos, 1)))
+                    break;
             }
-            if (dir != previous_dir) try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(previous_dir, dir), .pos = current_pos });
+            if (dir != prev_dir) try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(prev_dir, dir), .pos = current_pos });
             current_pos = next_pos;
         }
 
+        // Check if any turn taken in entering room, add turn to hall if so
+        if (dir != to_wall.direction.opposite())
+            try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(dir, to_wall.direction.opposite()), .pos = to_pos });
+
         // Add ending Entrance
-        try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(to_wall.direction), .pos = to_pos });
+        try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(to_wall.direction), .pos = step(to_pos, to_wall.direction.opposite(), 2) });
     }
 };
 
