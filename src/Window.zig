@@ -31,15 +31,24 @@ fn rel(a: isize, b: isize) usize {
     return std.math.absCast(a - b);
 }
 
-pub fn move(self: *Window, x: isize, y: isize) void {
+pub fn move(self: *Window, x: isize, y: isize) !void {
+    if (rel(self.offset.y, y) >= self.height)
+        return error.OutOfBounds;
+
     const abs_x = rel(self.offset.x, x);
     const abs_y = self.height - rel(self.offset.y, y);
     self.at = abs_y * self.width + abs_x;
 }
 
 pub fn setCell(self: *Window, x: isize, y: isize, ch: u21, style: Style) void {
+    if (rel(self.offset.y, y) >= self.height)
+        return;
+
     const abs_x = rel(self.offset.x, x);
     const abs_y = self.height - rel(self.offset.y, y);
+
+    if (abs_x >= self.width or abs_y >= self.height)
+        return;
 
     self.term.setCell(
         abs_x,
@@ -49,7 +58,7 @@ pub fn setCell(self: *Window, x: isize, y: isize, ch: u21, style: Style) void {
     );
 }
 
-pub const WriteError = os.WriteError;
+pub const WriteError = os.WriteError || Errors;
 
 // implement the Zig writer interface
 // TODO handle chars wider than 1
@@ -153,7 +162,7 @@ pub fn print(self: *Window, comptime format: []const u8, args: anytype) WriteErr
 
 // fmt print interface with a specified position
 pub fn printAt(self: *Window, comptime format: []const u8, args: anytype, x: isize, y: isize) WriteError!void {
-    self.move(x, y);
+    try self.move(x, y);
 
     var w = self.writer();
     return w.print(format, args);

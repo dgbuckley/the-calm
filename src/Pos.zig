@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const Pos = @This();
 
 x: isize,
@@ -23,3 +25,35 @@ pub fn orientation(p: Pos, q: Pos, r: Pos) Orientation {
 pub fn intersects(p1: Pos, q1: Pos, p2: Pos, q2: Pos) bool {
     return (orientation(p1, q1, p2) != orientation(p1, q1, q2)) and (orientation(p2, q2, p1) != orientation(p2, q2, q1));
 }
+
+pub fn manhattan_dist(from: Pos, to: Pos) usize {
+    return std.math.absCast(to.x - from.x) + std.math.absCast(to.y - from.y);
+}
+
+pub const Line = struct {
+    points: [2]Pos,
+
+    pub fn init(p1: Pos, p2: Pos) Line {
+        return .{ .points = .{ p1, p2 } };
+    }
+
+    pub fn intersects(l1: Line, l2: Line) bool {
+        return Pos.intersects(l1.points[0], l1.points[1], l2.points[0], l2.points[1]);
+    }
+};
+
+pub const Direction = enum {
+    Left,
+    Right,
+    Up,
+    Down,
+
+    pub fn opposite(dir: Direction) Direction {
+        switch (dir) {
+            .Left => return .Right,
+            .Right => return .Left,
+            .Up => return .Down,
+            .Down => return .Up,
+        }
+    }
+};
