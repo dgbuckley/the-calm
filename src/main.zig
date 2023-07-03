@@ -5,31 +5,8 @@ const termbox = @import("termbox");
 
 const Allocator = std.mem.Allocator;
 
-const Pos = struct {
-    x: isize,
-    y: isize,
-
-    const Orientation = enum(u8) {
-        Collinear = 0,
-        Clockwise,
-        Counter,
-    };
-
-    // Checks the orientation of 3 points
-    fn orientation(p: Pos, q: Pos, r: Pos) Orientation {
-        var lExpr: isize = ((q.y - p.y) * (r.x - q.x));
-        var rExpr: isize = ((q.x - p.x) * (r.y - q.y));
-        const val: isize = lExpr - rExpr;
-
-        if (val == 0) return .Collinear;
-        return if (val > 0) .Clockwise else .Counter;
-    }
-
-    // Test if line P intersect line Q
-    fn intersects(p1: Pos, q1: Pos, p2: Pos, q2: Pos) bool {
-        return (orientation(p1, q1, p2) != orientation(p1, q1, q2)) and (orientation(p2, q2, p1) != orientation(p2, q2, q1));
-    }
-};
+const Window = @import("./Window.zig");
+const Pos = @import("./Pos.zig");
 
 const Line = struct {
     points: [2]Pos,
@@ -133,92 +110,71 @@ const Hall = struct {
         }
     }
 
-    fn draw_enterance(segment: Hall.Point, t: *termbox.Termbox) !void {
-        var anchor = t.back_buffer.anchor(1, 1);
+    fn draw_enterance(segment: Hall.Point, win: *Window) !void {
         const pos = segment.pos;
         switch (segment.kind) {
             .EnterUp => {
-                anchor.move(@intCast(usize, pos.x - 1), @intCast(usize, pos.y));
-                _ = anchor.write("┘") catch 0;
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y));
-                _ = anchor.write(" ") catch 0;
-                anchor.move(@intCast(usize, pos.x + 1), @intCast(usize, pos.y));
-                _ = anchor.write("└") catch 0;
+                // try win.printAt("┘ └", .{}, pos.x - 1, pos.y);
+                try win.putAt(pos.x - 1, pos.y, '┘');
+                try win.putAt(pos.x, pos.y, ' ');
+                try win.putAt(pos.x + 1, pos.y, '└');
             },
             .EnterDown => {
-                anchor.move(@intCast(usize, pos.x - 1), @intCast(usize, pos.y));
-                _ = anchor.write("┐") catch 0;
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y));
-                _ = anchor.write(" ") catch 0;
-                anchor.move(@intCast(usize, pos.x + 1), @intCast(usize, pos.y));
-                _ = anchor.write("┌") catch 0;
+                // try win.printAt("┐ ┌", .{}, pos.x - 1, pos.y);
+                try win.putAt(pos.x - 1, pos.y, '┐');
+                try win.putAt(pos.x, pos.y, ' ');
+                try win.putAt(pos.x + 1, pos.y, '┌');
             },
             .EnterLeft => {
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y - 1));
-                _ = anchor.write("┘") catch 0;
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y));
-                _ = anchor.write(" ") catch 0;
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y + 1));
-                _ = anchor.write("┐") catch 0;
+                try win.putAt(pos.x, pos.y + 1, '┘');
+                try win.putAt(pos.x, pos.y, ' ');
+                try win.putAt(pos.x, pos.y - 1, '┐');
             },
             .EnterRight => {
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y - 1));
-                _ = anchor.write("└") catch 0;
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y));
-                _ = anchor.write(" ") catch 0;
-                anchor.move(@intCast(usize, pos.x), @intCast(usize, pos.y + 1));
-                _ = anchor.write("┌") catch 0;
+                try win.putAt(pos.x, pos.y + 1, '└');
+                try win.putAt(pos.x, pos.y, ' ');
+                try win.putAt(pos.x, pos.y - 1, '┌');
             },
             else => @panic("Invalid Enterance"),
         }
     }
 
-    fn draw(hall: Hall, t: *termbox.Termbox) !void {
-        // draw entrance
-        // while not enterance
-        //   draw hall, vertical or horizontal
-        //   draw segment
-
-        var anchor = t.back_buffer.anchor(1, 1);
-
+    fn draw(hall: Hall, win: *Window) !void {
         std.debug.assert(hall.segments.items.len >= 2);
 
-        try draw_enterance(hall.segments.items[0], t);
+        try draw_enterance(hall.segments.items[0], win);
 
         var prev = hall.segments.items[0];
         for (hall.segments.items[1..]) |segment| {
             if (prev.pos.x == segment.pos.x) {
                 // vertical
-                var y = @min(prev.pos.y, segment.pos.y);
-                var height = @max(prev.pos.y, segment.pos.y);
-                while (y < height) : (y += 1) {
-                    anchor.move(@intCast(usize, segment.pos.x - 1), @intCast(usize, y));
-                    _ = anchor.write("│ │") catch 0;
+                var y: isize = 1;
+                var height = std.math.absCast(prev.pos.y - segment.pos.y);
+
+                while (y < height - 1) : (y += 1) {
+                    // try win.printAt("│ │", .{}, prev.pos.x - 1, y);
+                    try win.putAt(prev.pos.x - 1, prev.pos.y + y, '│');
+                    try win.putAt(prev.pos.x, prev.pos.y + y, ' ');
+                    try win.putAt(prev.pos.x + 1, prev.pos.y + y, '│');
                 }
             } else {
                 std.debug.assert(prev.pos.y == segment.pos.y);
                 // horizontal
                 var x = @min(prev.pos.x, segment.pos.x);
-                var width = @max(prev.pos.x, segment.pos.x);
+                var width = std.math.absCast(prev.pos.x - segment.pos.x);
 
-                anchor.move(@intCast(usize, x), @intCast(usize, segment.pos.y - 1));
-                while (x < width) : (x += 1) {
-                    _ = anchor.write("─") catch 0;
-                }
-
-                x = @min(prev.pos.x, segment.pos.x);
-                anchor.move(@intCast(usize, x), @intCast(usize, segment.pos.y));
-                while (x < width) : (x += 1) {
-                    _ = anchor.write("─") catch 0;
-                }
+                try win.putN(x + 1, segment.pos.y + 1, '─', width - 1);
+                try win.putN(x + 1, segment.pos.y, ' ', width - 1);
+                try win.putN(x + 1, segment.pos.y - 1, '─', width - 1);
             }
 
             switch (segment.kind) {
                 .EnterUp, .EnterDown, .EnterLeft, .EnterRight => {
-                    try draw_enterance(segment, t);
+                    try draw_enterance(segment, win);
                 },
                 else => {},
             }
+            prev = segment;
         }
 
         return;
@@ -231,31 +187,22 @@ const Room = struct {
     height: u32,
     halls: std.ArrayListUnmanaged(*Hall),
 
-    fn draw(room: Room, t: *termbox.Termbox) !void {
-        var anchor = t.back_buffer.anchor(@intCast(usize, room.pos.x), @intCast(usize, room.pos.y));
-
+    fn draw(room: Room, win: *Window) !void {
         var x = room.pos.x;
-        anchor.move(@intCast(usize, x), @intCast(usize, room.pos.y));
-        while (x < room.pos.x + room.width) : (x += 1) {
-            _ = anchor.write("─") catch 0;
-        }
+
+        try win.putN(x, room.pos.y, '─', room.width);
 
         var y = room.pos.y + 1;
         while (y < room.pos.y + room.height - 1) : (y += 1) {
-            anchor.move(@intCast(usize, room.pos.x), @intCast(usize, y));
-            _ = anchor.write("│") catch 0;
-            anchor.move(@intCast(usize, room.pos.x + room.width), @intCast(usize, y));
-            _ = anchor.write("│") catch 0;
+            try win.putAt(room.pos.x, y, '│');
+            try win.putN(room.pos.x + 1, room.pos.y, ' ', room.width - 2);
+            try win.putAt(room.pos.x + room.width - 1, y, '│');
         }
 
-        x = room.pos.x;
-        anchor.move(@intCast(usize, x), @intCast(usize, room.pos.y + room.height));
-        while (x < room.pos.x + room.width) : (x += 1) {
-            _ = anchor.write("─") catch 0;
-        }
+        try win.putN(x, room.pos.y + room.height - 1, '─', room.width);
 
         for (room.halls.items) |hall| {
-            try hall.draw(t);
+            try hall.draw(win);
         }
     }
 
@@ -410,6 +357,8 @@ const Room = struct {
 
         var hall: *Hall = try ally.create(Hall);
         hall.* = .{ .segments = .{} };
+        try to.halls.append(ally, hall);
+        try from.halls.append(ally, hall);
         try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = from_pos });
 
         var current_pos = from_pos;
@@ -485,18 +434,15 @@ pub fn main() !void {
         .mode = .Esc,
         .mouse = true,
     });
-    var anchor = t.back_buffer.anchor(1, 1);
-    try anchor.writer().print("Input testing", .{});
 
-    anchor.move(1, 2);
-    try anchor.writer().print("Press q key to quit", .{});
+    var win = Window.init(t.term_h, t.term_w, &t);
 
     var room1 = Room{ .pos = Pos{ .x = 10, .y = 10 }, .width = 5, .height = 5, .halls = std.ArrayListUnmanaged(*Hall){} };
     var room2 = Room{ .pos = Pos{ .x = 30, .y = 20 }, .width = 5, .height = 5, .halls = std.ArrayListUnmanaged(*Hall){} };
     try room1.join(std.heap.page_allocator, &room2);
 
-    try room1.draw(&t);
-    try room2.draw(&t);
+    try room1.draw(&win);
+    try room2.draw(&win);
 
     try t.present();
 
