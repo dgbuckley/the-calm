@@ -19,7 +19,7 @@ pub fn orientation(p: Pos, q: Pos, r: Pos) Orientation {
     return if (val > 0) .Clockwise else .Counter;
 }
 
-// Test if line P intersect line Q
+// Test if line 1 intersect line 2
 pub fn intersects(p1: Pos, q1: Pos, p2: Pos, q2: Pos) bool {
     return (orientation(p1, q1, p2) != orientation(p1, q1, q2)) and (orientation(p2, q2, p1) != orientation(p2, q2, q1));
 }
