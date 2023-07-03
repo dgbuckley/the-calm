@@ -114,16 +114,10 @@ const Hall = struct {
         const pos = segment.pos;
         switch (segment.kind) {
             .EnterUp => {
-                // try win.printAt("┘ └", .{}, pos.x - 1, pos.y);
-                try win.putAt(pos.x - 1, pos.y, '┘');
-                try win.putAt(pos.x, pos.y, ' ');
-                try win.putAt(pos.x + 1, pos.y, '└');
+                try win.printAt("┘ └", .{}, pos.x - 1, pos.y);
             },
             .EnterDown => {
-                // try win.printAt("┐ ┌", .{}, pos.x - 1, pos.y);
-                try win.putAt(pos.x - 1, pos.y, '┐');
-                try win.putAt(pos.x, pos.y, ' ');
-                try win.putAt(pos.x + 1, pos.y, '┌');
+                try win.printAt("┐ ┌", .{}, pos.x - 1, pos.y);
             },
             .EnterLeft => {
                 try win.putAt(pos.x, pos.y + 1, '┘');
@@ -152,10 +146,10 @@ const Hall = struct {
                 var height = std.math.absCast(prev.pos.y - segment.pos.y);
 
                 while (y < height - 1) : (y += 1) {
-                    // try win.printAt("│ │", .{}, prev.pos.x - 1, y);
-                    try win.putAt(prev.pos.x - 1, prev.pos.y + y, '│');
-                    try win.putAt(prev.pos.x, prev.pos.y + y, ' ');
-                    try win.putAt(prev.pos.x + 1, prev.pos.y + y, '│');
+                    try win.printAt("│ │", .{}, prev.pos.x - 1, prev.pos.y + y);
+                    // try win.putAt(prev.pos.x - 1, prev.pos.y + y, '│');
+                    // try win.putAt(prev.pos.x, prev.pos.y + y, ' ');
+                    // try win.putAt(prev.pos.x + 1, prev.pos.y + y, '│');
                 }
             } else {
                 std.debug.assert(prev.pos.y == segment.pos.y);

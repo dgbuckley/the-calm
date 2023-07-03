@@ -53,7 +53,7 @@ pub const WriteError = os.WriteError;
 
 // implement the Zig writer interface
 // TODO handle chars wider than 1
-pub fn write(self: *Window, bytes: []const u8) WriteError!usize {
+fn writeBytes(self: *Window, bytes: []const u8) WriteError!usize {
     var at_x = self.at % self.width;
     var at_y = self.at / self.width;
 
@@ -87,6 +87,57 @@ pub fn write(self: *Window, bytes: []const u8) WriteError!usize {
     self.at = at_y * self.width + at_x;
 
     return written;
+}
+
+fn writeUnicode(self: *Window, bytes: []const u8) WriteError!usize {
+    std.debug.assert(std.unicode.utf8ValidateSlice(bytes));
+
+    var at_x = self.at % self.width;
+    var at_y = self.at / self.width;
+
+    const max_x = self.width;
+    const max_y = self.height;
+
+    var written: usize = 0;
+
+    var i: usize = 0;
+    while (i < bytes.len) {
+        const u_size = std.unicode.utf8ByteSequenceLength(bytes[i]) catch unreachable;
+        const c = std.unicode.utf8Decode(bytes[i .. i + u_size]) catch unreachable;
+
+        if (c == '\n' or c == '\r') {
+            at_y += 1;
+            at_x = 0;
+            written += 1;
+            continue;
+        }
+
+        // If we overflow the height value then just return as if we wrote
+        // all of the bytes requested. No point in writing bytes that won't
+        // be printed.
+        if (at_y >= max_y) {
+            return bytes.len;
+        }
+
+        if (at_x < max_x) {
+            try self.putAt(self.offset.x + @intCast(isize, at_x), self.offset.y + @intCast(isize, self.height - at_y), c);
+        }
+
+        written += u_size;
+        at_x += 1;
+        i += u_size;
+    }
+
+    self.at = at_y * self.width + at_x;
+
+    return written;
+}
+
+pub fn write(self: *Window, bytes: []const u8) WriteError!usize {
+    if (!std.unicode.utf8ValidateSlice(bytes))
+        return self.writeBytes(bytes)
+    else
+        return self.writeUnicode(bytes);
 }
 
 pub const Writer = io.Writer(*Window, WriteError, write);
