@@ -217,16 +217,20 @@ const Room = struct {
     fn draw(room: Room, win: *Window) !void {
         var x = room.pos.x;
 
-        try win.putN(x, room.pos.y, '─', room.width);
+        try win.putN(x + 1, room.pos.y, '─', room.width - 2);
+        try win.putAt(x, room.pos.y, '└');
+        try win.putAt(x + room.width - 1, room.pos.y, '┘');
 
         var y = room.pos.y + 1;
         while (y < room.pos.y + room.height - 1) : (y += 1) {
             try win.putAt(room.pos.x, y, '│');
-            try win.putN(room.pos.x + 1, room.pos.y, ' ', room.width - 2);
+            try win.putN(room.pos.x + 1, y, ' ', room.width - 2);
             try win.putAt(room.pos.x + room.width - 1, y, '│');
         }
 
-        try win.putN(x, room.pos.y + room.height - 1, '─', room.width);
+        try win.putN(x, room.pos.y + room.height - 1, '─', room.width - 1);
+        try win.putAt(x, room.pos.y + room.height - 1, '┌');
+        try win.putAt(x + room.width - 1, room.pos.y + room.height - 1, '┐');
 
         for (room.halls.items) |hall| {
             try hall.draw(win);
