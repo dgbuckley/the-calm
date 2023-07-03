@@ -121,22 +121,20 @@ const Hall = struct {
         const pos = segment.pos;
         switch (segment.kind) {
             .EnterUp => {
-                try win.printAt("│ │", .{}, pos.x - 1, pos.y + 1);
                 try win.printAt("┘ └", .{}, pos.x - 1, pos.y);
             },
             .EnterDown => {
                 try win.printAt("┐ ┌", .{}, pos.x - 1, pos.y);
-                try win.printAt("│ │", .{}, pos.x - 1, pos.y - 1);
             },
             .EnterLeft => {
-                try win.printAt("─┘", .{}, pos.x, pos.y + 1);
-                try win.printAt("  ", .{}, pos.x, pos.y);
-                try win.printAt("─┐", .{}, pos.x, pos.y - 1);
+                try win.putAt(pos.x, pos.y + 1, '┘');
+                try win.putAt(pos.x, pos.y, ' ');
+                try win.putAt(pos.x, pos.y - 1, '┐');
             },
             .EnterRight => {
-                try win.printAt("└─", .{}, pos.x, pos.y + 1);
-                try win.printAt("  ", .{}, pos.x, pos.y);
-                try win.printAt("┌─", .{}, pos.x, pos.y - 1);
+                try win.putAt(pos.x, pos.y + 1, '└');
+                try win.putAt(pos.x, pos.y, ' ');
+                try win.putAt(pos.x, pos.y - 1, '┌');
             },
             else => @panic("Invalid Enterance"),
         }
@@ -172,36 +170,37 @@ const Hall = struct {
     fn draw(hall: Hall, win: *Window) !void {
         std.debug.assert(hall.segments.items.len >= 2);
 
-        try draw_enterance(hall.segments.items[0], win);
-
         var prev = hall.segments.items[0];
         for (hall.segments.items[1..]) |segment| {
             if (prev.pos.x == segment.pos.x) {
                 // vertical
-                var y: isize = 2;
+                var y: isize = 1;
                 var height = std.math.absCast(prev.pos.y - segment.pos.y);
 
-                while (y < height - 1) : (y += 1) {
+                while (y < height) : (y += 1) {
                     try win.printAt("│ │", .{}, prev.pos.x - 1, prev.pos.y + y);
                 }
             } else {
                 std.debug.assert(prev.pos.y == segment.pos.y);
                 // horizontal
-                var x = @min(prev.pos.x, segment.pos.x) + 2;
-                var width = std.math.absCast(prev.pos.x - segment.pos.x) - 2;
+                var x = @min(prev.pos.x, segment.pos.x) + 1;
+                var width = std.math.absCast(prev.pos.x - segment.pos.x);
 
                 try win.putN(x, segment.pos.y + 1, '─', width - 1);
                 try win.putN(x, segment.pos.y, ' ', width - 1);
                 try win.putN(x, segment.pos.y - 1, '─', width - 1);
             }
 
+            prev = segment;
+        }
+
+        for (hall.segments.items) |segment| {
             switch (segment.kind) {
                 .EnterUp, .EnterDown, .EnterLeft, .EnterRight => {
                     try draw_enterance(segment, win);
                 },
                 else => try draw_corner(segment, win),
             }
-            prev = segment;
         }
 
         return;
