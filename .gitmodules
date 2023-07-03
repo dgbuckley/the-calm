@@ -1,0 +1,3 @@
+[submodule "deps/termbox"]
+	path = deps/termbox
+	url = https://github.com/dgbuckley/zig-termbox
