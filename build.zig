@@ -28,6 +28,7 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe_tests = b.addTest("src/main.zig");
     exe_tests.setTarget(target);
+    exe_tests.addPackagePath("termbox", "deps/termbox/src/main.zig");
     exe_tests.setBuildMode(mode);
 
     const test_step = b.step("test", "Run unit tests");
