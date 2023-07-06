@@ -6,7 +6,8 @@ const termbox = @import("termbox");
 const Allocator = std.mem.Allocator;
 
 const Chunk = @import("Chunk.zig");
-const Window = @import("./Window.zig");
+const Context = @import("./ui.zig").Context;
+const Window = @import("./ui.zig").Window;
 
 fn getmaxyx(y: *u16, x: *u16) void {
     var winsize: std.os.linux.winsize = undefined;
@@ -25,7 +26,8 @@ pub fn main() !void {
         .mouse = true,
     });
 
-    var win = Window.init(t.term_h, t.term_w, &t);
+    var ctx = Context.init(t.term_h, t.term_w, &t);
+    var win = Window{ .ctx = ctx, .pos = .{ .x = 0, .y = 0 } };
 
     var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.nanoTimestamp()));
     var chunk = try Chunk.init(std.heap.page_allocator, .{ .x = 0, .y = 0 }, rng.random());

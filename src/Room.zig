@@ -6,7 +6,7 @@ const Direction = Pos.Direction;
 const Hall = @import("./Hall.zig");
 const Line = Pos.Line;
 const Pos = @import("./Pos.zig");
-const Window = @import("./Window.zig");
+const Window = @import("./ui.zig").Window;
 
 const Room = @This();
 
@@ -33,20 +33,20 @@ pub fn deinit(room: *Room, ally: Allocator) void {
 pub fn draw(room: Room, win: *Window) !void {
     var x = room.pos.x;
 
-    try win.putN(x + 1, room.pos.y, '─', room.width - 2);
-    try win.putAt(x, room.pos.y, '└');
-    try win.putAt(x + room.width - 1, room.pos.y, '┘');
+    win.putNHorizontal(x + 1, room.pos.y, '─', room.width - 2);
+    win.putAt(x, room.pos.y, '└');
+    win.putAt(x + room.width - 1, room.pos.y, '┘');
 
     var y = room.pos.y + 1;
     while (y < room.pos.y + room.height - 1) : (y += 1) {
-        try win.putAt(room.pos.x, y, '│');
-        try win.putN(room.pos.x + 1, y, ' ', room.width - 2);
-        try win.putAt(room.pos.x + room.width - 1, y, '│');
+        win.putAt(room.pos.x, y, '│');
+        win.putNHorizontal(room.pos.x + 1, y, ' ', room.width - 2);
+        win.putAt(room.pos.x + room.width - 1, y, '│');
     }
 
-    try win.putN(x, room.pos.y + room.height - 1, '─', room.width - 1);
-    try win.putAt(x, room.pos.y + room.height - 1, '┌');
-    try win.putAt(x + room.width - 1, room.pos.y + room.height - 1, '┐');
+    win.putNHorizontal(x, room.pos.y + room.height - 1, '─', room.width - 1);
+    win.putAt(x, room.pos.y + room.height - 1, '┌');
+    win.putAt(x + room.width - 1, room.pos.y + room.height - 1, '┐');
 
     for (room.halls.items) |hall| {
         try hall.draw(win);
