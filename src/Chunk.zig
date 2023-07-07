@@ -12,8 +12,8 @@ pos: Pos,
 rooms: std.ArrayListUnmanaged(*Room),
 rng: std.rand.Random,
 
-const Width: isize = 250;
-const Height: isize = 250;
+const Width: isize = 120;
+const Height: isize = 120;
 
 pub fn init(ally: Allocator, pos: Pos, rng: std.rand.Random) Allocator.Error!*Chunk {
     std.debug.assert(@mod(pos.x, Chunk.Width) == 0 and @mod(pos.y, Chunk.Height) == 0);
@@ -57,10 +57,11 @@ const Triangle = struct {
     list: LinkedList(Triangle, "list").Node,
 
     // Three points in clockwise orientation, making a traingle
-    fn init(ally: Allocator, points: [3]*Point, contains: []const *Point) !Triangle {
+    fn init(ally: Allocator, points: [3]*Point, contains: []const *Point) !*Triangle {
         std.debug.assert(Pos.orientation(points[0].p, points[1].p, points[2].p) == .Clockwise);
 
-        var t = Triangle{
+        var t = try ally.create(Triangle);
+        t.* = Triangle{
             .points = points,
             .contains = std.ArrayListUnmanaged(*Point){},
             .list = LinkedList(Triangle, "list").Node{ .next = null, .prev = null },
@@ -72,6 +73,7 @@ const Triangle = struct {
     fn deinit(t: *Triangle, ally: Allocator) void {
         _ = t.list.remove();
         t.contains.deinit(ally);
+        ally.destroy(t);
     }
 
     fn is_inside(t: Triangle, p: *Point) bool {
@@ -206,7 +208,7 @@ fn LinkedList(comptime T: type, comptime node_field_name: []const u8) type {
 
             fn insert_after(self: *Node, after: *Node) *Node {
                 if (@import("builtin").mode == .Debug) {
-                    std.debug.assert(after.next != null and after.prev != null);
+                    std.debug.assert(after.next == null and after.prev == null);
                 }
 
                 if (self.next) |next| {
@@ -234,12 +236,13 @@ fn halls_from_points(ally: Allocator, point: *Point, room_map: [ROOMS]?*Room) !v
     point.n.clearAndFree(ally);
 
     for (neighbors) |n| {
+        if (n.id == std.math.maxInt(usize)) continue;
         try room_map[point.id].?.join(ally, room_map[n.id].?);
         try halls_from_points(ally, n, room_map);
     }
 }
 
-const ROOMS = 5;
+const ROOMS = 4;
 fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
 
     // room_store stores the rooms in memory
@@ -249,11 +252,11 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
     for (room_store) |*room| {
         const width = chunk.rng.intRangeAtMost(u32, 8, 15);
         const height = chunk.rng.intRangeAtMost(u32, 8, 15);
-        const x = chunk.rng.intRangeAtMost(usize, 0, @as(usize, Width) - width - 1);
-        const y = chunk.rng.intRangeAtMost(usize, 0, @as(usize, Height) - height - 1);
+        const x = chunk.rng.intRangeAtMost(isize, chunk.pos.x, chunk.pos.x + Width - @as(isize, width) - 1);
+        const y = chunk.rng.intRangeAtMost(isize, chunk.pos.y, chunk.pos.y + Height - @as(isize, height) - 1);
 
         room.* = PotentialRoom{
-            .pos = .{ .x = @intCast(isize, x), .y = @intCast(isize, y) },
+            .pos = .{ .x = x, .y = y },
             .width = width,
             .height = height,
             .connections = std.ArrayListUnmanaged(usize){},
@@ -284,29 +287,32 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
         }
     }
 
+    var triangle_buf = std.heap.ArenaAllocator.init(ally);
+    defer triangle_buf.deinit();
+
     var triangles = LinkedList(Triangle, "list"){ .head = null };
 
-    var bounds = try Triangle.init(ally, [3]*Point{ &rooms[0].?, &rooms[1].?, &rooms[2].? }, &.{});
-    for (rooms) |*p| {
+    var bounds = try Triangle.init(triangle_buf.allocator(), [3]*Point{ &rooms[0].?, &rooms[1].?, &rooms[2].? }, &.{});
+    for (rooms[3..]) |*p| {
         if (p.* == null) continue;
+        std.debug.assert(bounds.is_inside(&p.*.?));
         try bounds.contains.append(ally, &p.*.?);
     }
 
     triangles.insert(&bounds.list);
 
     var point = bounds.contains.pop();
-    var tri = &bounds;
-    while (true) {
-        // code here
-        var t1 = try Triangle.init(ally, .{ tri.contains.items[0], tri.contains.items[1], point }, &.{});
-        var t2 = try Triangle.init(ally, .{ tri.contains.items[1], tri.contains.items[2], point }, &.{});
-        var t3 = try Triangle.init(ally, .{ tri.contains.items[2], tri.contains.items[0], point }, &.{});
-        triangles.insert(&t1.list);
-        triangles.insert(&t2.list);
-        triangles.insert(&t3.list);
+    var tri = bounds;
+    loop: while (true) {
+        var t1 = try Triangle.init(triangle_buf.allocator(), .{ tri.points[0], tri.points[1], point }, &.{});
+        var t2 = try Triangle.init(triangle_buf.allocator(), .{ tri.points[1], tri.points[2], point }, &.{});
+        var t3 = try Triangle.init(triangle_buf.allocator(), .{ tri.points[2], tri.points[0], point }, &.{});
+        _ = tri.list.insert_after(&t1.list);
+        _ = tri.list.insert_after(&t2.list);
+        _ = tri.list.insert_after(&t3.list);
 
         // move all points into the new triangles
-        for ([_]Triangle{ t1, t2, t3 }) |*t| {
+        for ([_]*Triangle{ t1, t2, t3 }) |t| {
             for (t.points) |p, i| {
                 var p1 = t.points[(i + 1) % 3];
                 var p2 = t.points[(i + 2) % 3];
@@ -315,7 +321,7 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
                 try p.n.put(ally, p2.id, p2);
             }
 
-            for (bounds.contains.items) |p| {
+            for (tri.contains.items) |p| {
                 // Can be optimized by no running oriantation for each point more than just on each newly created line
                 if (t.is_inside(p)) try t.contains.append(ally, p);
             }
@@ -324,7 +330,7 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
         // TODO check for delaunay and swap if needed
 
         var old = tri;
-        defer old.deinit(ally);
+        defer old.deinit(triangle_buf.allocator());
         tri = if (tri.list.next) |t| t.data() else break;
         point = tri.contains.popOrNull() orelse blk: {
             var n = tri.list.next;
@@ -333,7 +339,7 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
                 var p = next.contains.popOrNull() orelse continue;
                 tri = next;
                 break :blk p;
-            }
+            } else break :loop;
         };
     }
 
