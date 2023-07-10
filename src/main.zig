@@ -37,9 +37,37 @@ pub fn main() !void {
         try room.draw(&win);
     }
 
-    try t.present();
+    const ArrowUp = 0xFFFF - 18;
+    const ArrowDown = 0xFFFF - 19;
+    const ArrowLeft = 0xFFFF - 20;
+    const ArrowRight = 0xFFFF - 21;
 
-    _ = try t.pollEvent();
+    main: while (true) {
+        switch (try t.pollEvent()) {
+            .Key => |key_ev| {
+                switch (key_ev.ch) {
+                    'q' => break :main,
+                    else => {},
+                }
+                switch (key_ev.key) {
+                    ArrowUp => win.pos.y -= 1,
+                    ArrowDown => win.pos.y += 1,
+                    ArrowRight => win.pos.x += 1,
+                    ArrowLeft => win.pos.x -= 1,
+                    else => {},
+                }
+            },
+            else => {},
+        }
+
+        t.clear();
+
+        for (chunk.rooms.items) |room| {
+            try room.draw(&win);
+        }
+
+        try t.present();
+    }
 }
 
 test {

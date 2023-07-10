@@ -242,7 +242,7 @@ fn halls_from_points(ally: Allocator, point: *Point, room_map: [ROOMS]?*Room) !v
     }
 }
 
-const ROOMS = 4;
+const ROOMS = 6;
 fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
 
     // room_store stores the rooms in memory
