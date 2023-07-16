@@ -198,7 +198,7 @@ pub const Window = struct {
         if (win.isOutOfBounds(x, y)) return;
 
         const rel_x = x - win.pos.x;
-        const rel_y = win.pos.y - y;
+        const rel_y = @intCast(isize, win.ctx.height) - (y - win.pos.y);
 
         win.ctx.move(@intCast(usize, rel_x), @intCast(usize, rel_y)) catch unreachable;
     }
@@ -207,7 +207,7 @@ pub const Window = struct {
         if (win.isOutOfBounds(x, y)) return;
 
         const rel_x = x - win.pos.x;
-        const rel_y = @intCast(isize, win.ctx.height) - y - win.pos.y;
+        const rel_y = @intCast(isize, win.ctx.height) - (y - win.pos.y);
 
         win.ctx.setCell(@intCast(usize, rel_x), @intCast(usize, rel_y), ch, style) catch unreachable;
     }
