@@ -191,7 +191,7 @@ pub const Window = struct {
     pub const WriteError = Context.WriteError;
 
     fn isOutOfBounds(win: Window, x: isize, y: isize) bool {
-        return (x < win.pos.x or y - win.pos.y > win.ctx.height or x >= win.pos.x + @intCast(isize, win.ctx.width) or y < win.pos.y);
+        return (x < win.pos.x or y - win.pos.y > win.ctx.height or x >= win.pos.x + @intCast(isize, win.ctx.width) or y <= win.pos.y);
     }
 
     pub fn move(win: *Window, x: isize, y: isize) void {
