@@ -30,7 +30,7 @@ pub fn deinit(room: *Room, ally: Allocator) void {
     ally.destroy(room);
 }
 
-pub fn draw(room: Room, win: *Window) !void {
+pub fn draw(room: Room, win: *Window) void {
     var x = room.pos.x;
 
     win.putNHorizontal(x + 1, room.pos.y, '─', room.width - 2);
@@ -49,7 +49,7 @@ pub fn draw(room: Room, win: *Window) !void {
     win.putAt(x + room.width - 1, room.pos.y + room.height - 1, '┐');
 
     for (room.halls.items) |hall| {
-        try hall.draw(win);
+        hall.draw(win);
     }
 }
 

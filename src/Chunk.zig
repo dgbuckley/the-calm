@@ -17,7 +17,7 @@ const Height: isize = 120;
 
 pub fn init(ally: Allocator, pos: Pos, rng: std.rand.Random) Allocator.Error!*Chunk {
     std.debug.assert(@mod(pos.x, Chunk.Width) == 0 and @mod(pos.y, Chunk.Height) == 0);
-    var chunk: *Chunk = try std.heap.page_allocator.create(Chunk);
+    var chunk: *Chunk = try ally.create(Chunk);
     chunk.* = .{ .pos = pos, .rooms = std.ArrayListUnmanaged(*Room){}, .rng = rng };
     try chunk.generateRooms(ally);
     return chunk;

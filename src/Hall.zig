@@ -96,7 +96,7 @@ pub fn get_entrance_type(to: Direction) Point.Kind {
     }
 }
 
-fn draw_enterance(segment: Hall.Point, win: *Window) !void {
+fn draw_enterance(segment: Hall.Point, win: *Window) void {
     const pos = segment.pos;
     switch (segment.kind) {
         .EnterUp => {
@@ -119,7 +119,7 @@ fn draw_enterance(segment: Hall.Point, win: *Window) !void {
     }
 }
 
-fn draw_corner(segment: Hall.Point, win: *Window) !void {
+fn draw_corner(segment: Hall.Point, win: *Window) void {
     const pos = segment.pos;
     switch (segment.kind) {
         .UpRight => {
@@ -146,7 +146,7 @@ fn draw_corner(segment: Hall.Point, win: *Window) !void {
     }
 }
 
-pub fn draw(hall: Hall, win: *Window) !void {
+pub fn draw(hall: Hall, win: *Window) void {
     std.debug.assert(hall.segments.items.len >= 2);
 
     var prev = hall.segments.items[0];
@@ -176,9 +176,9 @@ pub fn draw(hall: Hall, win: *Window) !void {
     for (hall.segments.items) |segment| {
         switch (segment.kind) {
             .EnterUp, .EnterDown, .EnterLeft, .EnterRight => {
-                try draw_enterance(segment, win);
+                draw_enterance(segment, win);
             },
-            else => try draw_corner(segment, win),
+            else => draw_corner(segment, win),
         }
     }
 

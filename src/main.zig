@@ -1,13 +1,14 @@
 const std = @import("std");
 const assert = std.debug.assert;
-
 const termbox = @import("termbox");
-
 const Allocator = std.mem.Allocator;
 
+const libui = @import("ui.zig");
 const Chunk = @import("Chunk.zig");
-const Context = @import("./ui.zig").Context;
-const Window = @import("./ui.zig").Window;
+const Context = libui.Context;
+const Game = @import("Game.zig");
+const Window = libui.Window;
+const UI = libui.UI;
 
 fn getmaxyx(y: *u16, x: *u16) void {
     var winsize: std.os.linux.winsize = undefined;
@@ -18,55 +19,23 @@ fn getmaxyx(y: *u16, x: *u16) void {
 }
 
 pub fn main() !void {
-    var t = try termbox.Termbox.init(std.heap.page_allocator);
-    defer t.shutdown() catch {};
-
-    try t.selectInputSettings(termbox.InputSettings{
-        .mode = .Esc,
-        .mouse = true,
-    });
-
-    var ctx = Context.init(t.term_h, t.term_w, &t);
-    var win = Window{ .ctx = ctx, .pos = .{ .x = 0, .y = 0 } };
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // defer _ = gpa.deinit();
+    var ally = gpa.allocator();
 
     var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.nanoTimestamp()));
-    var chunk = try Chunk.init(std.heap.page_allocator, .{ .x = 0, .y = 0 }, rng.random());
-    defer chunk.deinit(std.heap.page_allocator);
+    var game = try Game.init(ally, rng.random());
+    defer game.deinit();
+    try game.newGame();
 
-    for (chunk.rooms.items) |room| {
-        try room.draw(&win);
-    }
+    var ui = try UI.init(ally, game);
+    defer ui.deinit(ally);
 
-    const ArrowUp = 0xFFFF - 18;
-    const ArrowDown = 0xFFFF - 19;
-    const ArrowLeft = 0xFFFF - 20;
-    const ArrowRight = 0xFFFF - 21;
+    while (!ui.shouldExit()) {
+        const tick = try ui.tick();
 
-    main: while (true) {
-        switch (try t.pollEvent()) {
-            .Key => |key_ev| {
-                switch (key_ev.ch) {
-                    'q' => break :main,
-                    else => {},
-                }
-                switch (key_ev.key) {
-                    ArrowUp => win.pos.y -= 1,
-                    ArrowDown => win.pos.y += 1,
-                    ArrowRight => win.pos.x += 1,
-                    ArrowLeft => win.pos.x -= 1,
-                    else => {},
-                }
-            },
-            else => {},
-        }
-
-        t.clear();
-
-        for (chunk.rooms.items) |room| {
-            try room.draw(&win);
-        }
-
-        try t.present();
+        // ~60fps
+        if (!tick) std.time.sleep(16 * std.time.ns_per_ms);
     }
 }
 

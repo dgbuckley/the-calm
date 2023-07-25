@@ -1,10 +1,23 @@
-const std = @import("std");
 const io = std.io;
 const os = std.os;
-
+const std = @import("std");
 const termbox = @import("termbox");
-const Termbox = termbox.Termbox;
+const Allocator = std.mem.Allocator;
 const Style = termbox.Style;
+const Termbox = termbox.Termbox;
+
+const Game = @import("Game.zig");
+
+const KeyCode = enum(u16) {
+    ArrowUp = 0xFFFF - 18,
+    ArrowDown = 0xFFFF - 19,
+    ArrowLeft = 0xFFFF - 20,
+    ArrowRight = 0xFFFF - 21,
+    EOT = 0x03,
+    ESC = 0x1B,
+    Space = 0x20,
+    Backspace = 0x7F,
+};
 
 pub const Context = struct {
     term: *Termbox,
@@ -231,7 +244,7 @@ pub const Window = struct {
     }
 
     // Write ch n times horizontally right
-    // TODO optimise by using win.ctx.putAt in the loop
+    // TODO optimise by using ctx.putAt in the loop
     pub fn putNHorizontal(win: *Window, x: isize, y: isize, ch: u21, n: usize) void {
         var i: isize = 0;
         while (i < n) : (i += 1) {
@@ -240,11 +253,109 @@ pub const Window = struct {
     }
 
     // Write ch n times vertically down
-    // TODO optimise by using win.ctx.putAt in the loop
+    // TODO optimise by using ctx.putAt in the loop
     pub fn putNVertical(win: *Window, x: isize, y: isize, ch: u21, n: usize) void {
         var i: isize = 0;
         while (i < n) : (i += 1) {
             win.putAt(x, y + n - i, ch);
         }
+    }
+};
+
+pub const GameMapView = struct {
+    game: *Game,
+    pos: @import("Pos.zig"),
+
+    pub fn init(game: *Game) !GameMapView {
+        return GameMapView{ .game = game, .pos = .{ .x = 0, .y = 0 } };
+    }
+
+    pub fn draw(game: GameMapView, ctx: Context) void {
+        var win = Window{ .ctx = ctx, .pos = game.pos };
+        for (game.game.active_chunks.items) |c| {
+            for (c.rooms.items) |room| {
+                room.draw(&win);
+            }
+        }
+    }
+
+    pub fn handleInput(game: *GameMapView, event: termbox.Event) void {
+        switch (event) {
+            .Key => |key_ev| {
+                switch (key_ev.key) {
+                    // TODO when a character exists do we need win.pos?
+                    @enumToInt(KeyCode.ArrowUp) => game.pos.y += 1,
+                    @enumToInt(KeyCode.ArrowDown) => game.pos.y -= 1,
+                    @enumToInt(KeyCode.ArrowRight) => game.pos.x += 1,
+                    @enumToInt(KeyCode.ArrowLeft) => game.pos.x -= 1,
+                    else => {},
+                }
+            },
+            else => {},
+        }
+    }
+};
+
+pub const UI = struct {
+    term: Termbox,
+    done: bool = false,
+    map_view: GameMapView,
+
+    pub fn init(ally: Allocator, game: *Game) !*UI {
+        var ui = try ally.create(UI);
+        ui.* = .{
+            .term = try termbox.Termbox.init(std.heap.page_allocator),
+            .map_view = try GameMapView.init(game),
+        };
+
+        try ui.term.selectInputSettings(termbox.InputSettings{
+            .mode = .Esc,
+            .mouse = true,
+        });
+
+        return ui;
+    }
+
+    /// Updates the view and handles input. Returns whether there may be more input to read.
+    pub fn tick(ui: *UI) !bool {
+        var more = false;
+        if (ui.done) return false;
+
+        if (try ui.term.getEvent()) |e| {
+            switch (e) {
+                .Key => |k| {
+                    switch (k.key) {
+                        // Quit on Ctr-C
+                        @enumToInt(KeyCode.EOT) => {
+                            ui.done = true;
+                        },
+                        else => {},
+                    }
+                },
+                .Resize => {
+                    // TODO
+                },
+                .Mouse => unreachable,
+            }
+            ui.map_view.handleInput(e);
+            more = true;
+        }
+
+        // TODO track damage to only draw when needed
+        ui.term.clear();
+        ui.map_view.draw(Context.init(ui.term.term_h, ui.term.term_w, &ui.term));
+
+        try ui.term.present();
+
+        return more;
+    }
+
+    pub fn shouldExit(ui: UI) bool {
+        return ui.done;
+    }
+
+    pub fn deinit(ui: *UI, ally: Allocator) void {
+        ui.term.shutdown() catch {};
+        ally.destroy(ui);
     }
 };
