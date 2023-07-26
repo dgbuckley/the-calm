@@ -171,6 +171,43 @@ pub fn check_collision(room: *const Room, target: Pos, clearance: isize) bool {
         (target.y >= room.pos.y - clearance and target.y < room.pos.y + room.height + clearance);
 }
 
+const Node = struct {
+    pos: Pos,
+    G_cost: usize, // Distance from starting node
+    H_cost: usize, // Direct distance from target node
+    open: bool,
+    dir_from: Direction, // Direction of which node led to this
+};
+
+pub fn close_node(node_index: usize, openNodes: *std.ArrayList(Node), closedNodes: *std.AutoHashMap(Pos, usize), to_pos: Pos) error{OutOfMemory}!void {
+    var dir: Direction = .Left;
+    var n: Pos = Pos{ .x = 0, .y = 0 };
+    var i: u32 = 0;
+    // Iterate through each neighbor of current node
+    while (i < 4) : (i += 1) {
+        dir = @intToEnum(Direction, i);
+        n = step(openNodes.items[node_index].pos, dir, 1);
+        // Skip if neighbor already closed
+        if (closedNodes.get(n) != null) continue;
+        for (openNodes.items) |_, j| {
+            // Ensure node is the current neighbor
+            if (openNodes.items[j].pos.x != n.x or openNodes.items[j].pos.y != n.y) continue; // Filter out nodes not at pos n
+            std.debug.assert(openNodes.items[j].open); // Node should've alread been tested for being closed
+
+            if (openNodes.items[j].G_cost > openNodes.items[node_index].G_cost + 1) {
+                openNodes.items[j].G_cost = openNodes.items[node_index].G_cost + 1;
+                openNodes.items[j].dir_from = dir.opposite();
+            }
+            break;
+        } else {
+            try openNodes.append(Node{ .pos = n, .G_cost = openNodes.items[node_index].G_cost + 1, .H_cost = n.manhattan_dist(to_pos), .open = true, .dir_from = dir.opposite() });
+        }
+    }
+    // Set current node to closed
+    openNodes.items[node_index].open = false;
+    try closedNodes.put(openNodes.items[node_index].pos, node_index);
+}
+
 pub fn join(from: *Room, ally: Allocator, to: *Room) !void {
     // select from wall,
     // select point on from wall,
@@ -209,70 +246,61 @@ pub fn join(from: *Room, ally: Allocator, to: *Room) !void {
 
     // var DirectionWeights[@enumToInt(dir)] = dir;
 
+    var openNodes = std.ArrayList(Node).init(ally);
+    var closedNodes = std.AutoHashMap(Pos, usize).init(ally);
+
+    // Create node for initial position and imediatly close it
+    try openNodes.append(Node{ .pos = from_pos, .G_cost = 0, .H_cost = from_pos.manhattan_dist(to_pos), .open = true, .dir_from = from_wall.direction.opposite() });
+    try close_node(0, &openNodes, &closedNodes, to_pos);
+
+    var current_index: usize = 0;
+
+    while (openNodes.items[current_index].pos.x != to_pos.x or openNodes.items[current_index].pos.y != to_pos.y) {
+        // Find open node with smallest F_cost (G_cost + H_cost  or  distince to end node + distance from start node)
+        var smallest_F_cost: usize = std.math.maxInt(u32);
+        var selected_index: usize = 0;
+        for (openNodes.items) |node, i| {
+            if (!node.open) continue;
+            if (node.G_cost + node.H_cost < smallest_F_cost) {
+                smallest_F_cost = node.G_cost + node.H_cost;
+                selected_index = i;
+            }
+        }
+        current_index = selected_index;
+        try close_node(current_index, &openNodes, &closedNodes, to_pos);
+    }
+
+    // Build hallway going from to_pos to from_pos
+
     var hall: *Hall = try ally.create(Hall);
     hall.* = .{ .segments = .{} };
     try to.halls.append(ally, hall);
     try from.halls.append(ally, hall);
-    try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = step(from_pos, from_wall.direction.opposite(), 2) });
 
-    var current_pos = from_pos;
+    // add entrace on to_wall
+    try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(to_wall.direction), .pos = step(to_pos, to_wall.direction.opposite(), 2) });
 
-    var dir: Direction = from_wall.direction;
-    var prev_dir: Direction = dir;
-    var direction_weight = [4]f32{ 0, 0, 0, 0 };
+    // Add turns taken by path
+    var prev_dir: Direction = to_wall.direction;
+    var cur_pos: Pos = to_pos;
+    var cur_node = openNodes.items[
+        closedNodes.get(cur_pos) orelse @panic("Unable to find node at to_pos")
+    ];
 
-    while (current_pos.x != to_pos.x or current_pos.y != to_pos.y) {
-        prev_dir = dir;
+    while (cur_pos.x != from_pos.x or cur_pos.y != from_pos.y) {
+        if (cur_node.dir_from != prev_dir)
+            try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(prev_dir, cur_node.dir_from), .pos = cur_pos });
 
-        // Weight each direction
-        // Add one to each weight to allow prioritization of direction by decrease without risk of underflow
-        direction_weight[@enumToInt(Direction.Left)] = @intToFloat(f32, to_pos.manhattan_dist(step(current_pos, .Left, 1)) + 1);
-        direction_weight[@enumToInt(Direction.Right)] = @intToFloat(f32, to_pos.manhattan_dist(step(current_pos, .Right, 1)) + 1);
-        direction_weight[@enumToInt(Direction.Up)] = @intToFloat(f32, to_pos.manhattan_dist(step(current_pos, .Up, 1)) + 1);
-        direction_weight[@enumToInt(Direction.Down)] = @intToFloat(f32, to_pos.manhattan_dist(step(current_pos, .Down, 1)) + 1);
-
-        // Slightly prioritize continuing in same direction for straighter lines
-        direction_weight[@enumToInt(prev_dir)] -= @as(f32, 0.5);
-
-        // sorted directions by bring pos closest to goal
-        var closest_dir: [3]u32 = .{ 0, 0, 0 };
-        // Closest distances brought by step in closest_dir
-        var closest_dist: [3]f32 = .{ std.math.f32_max, std.math.f32_max, std.math.f32_max };
-        var index: u32 = 0;
-        while (index < 4) : (index += 1) {
-            var cur_dir: u32 = index;
-            var cur_dist = direction_weight[index];
-            var sortIndex: u32 = 0;
-            while (sortIndex < 3) : (sortIndex += 1) {
-                if (cur_dist < closest_dist[sortIndex] and
-                    @intToEnum(Direction, cur_dir) != dir.opposite())
-                {
-                    var tmpi: u32 = closest_dir[sortIndex];
-                    closest_dir[sortIndex] = cur_dir;
-                    cur_dir = tmpi;
-                    var tmpf: f32 = closest_dist[sortIndex];
-                    closest_dist[sortIndex] = cur_dist;
-                    cur_dist = tmpf;
-                }
-            }
-        }
-        index = 0;
-        var next_pos = current_pos;
-        while (index < 3) : (index += 1) {
-            dir = @intToEnum(Direction, closest_dir[index]);
-            next_pos = step(current_pos, dir, 1);
-            if ((next_pos.x == to_pos.x and next_pos.y == to_pos.y) or
-                !(from.check_collision(next_pos, 1) or to.check_collision(next_pos, 1)))
-                break;
-        }
-        if (dir != prev_dir) try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(prev_dir, dir), .pos = current_pos });
-        current_pos = next_pos;
+        prev_dir = cur_node.dir_from;
+        cur_pos = step(cur_pos, cur_node.dir_from, 1);
+        cur_node = openNodes.items[
+            closedNodes.get(cur_pos) orelse @panic("Unable to find node for position")
+        ];
     }
 
-    // Check if any turn taken in entering room, add turn to hall if so
-    if (dir != to_wall.direction.opposite())
-        try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(dir, to_wall.direction.opposite()), .pos = to_pos });
+    if (cur_node.dir_from != prev_dir and cur_node.dir_from != prev_dir.opposite())
+        try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(prev_dir, cur_node.dir_from), .pos = cur_pos });
 
-    // Add ending Entrance
-    try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(to_wall.direction), .pos = step(to_pos, to_wall.direction.opposite(), 2) });
+    // Add entrace on from_wall
+    try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = step(from_pos, from_wall.direction.opposite(), 2) });
 }
