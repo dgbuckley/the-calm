@@ -295,8 +295,6 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
     }
 
     // Generate rooms and bounds
-    var room_bounds = Room.RoomBounds.init(ally, 1);
-    defer room_bounds.deinit();
     chunk.rooms = try ally.alloc(Room, potential_rooms.len - 3);
     for (chunk.rooms) |*r, i| {
         var room = potential_rooms[i + 3];
@@ -307,8 +305,9 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
             .height = room.height,
             .halls = .{},
         };
-        try room_bounds.addBounds(r);
     }
+    var room_connector = try Room.Connector.init(ally, chunk.rooms);
+    defer room_connector.deinit();
 
     // Connect together chunk rooms based on potential rooms connections
     // Assumed potential room connections are two way
@@ -317,7 +316,7 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
         for (room.connections.items) |l| {
             const l_idx = indexOf(PotentialRoom, l, &potential_rooms[0]);
             if (l_idx < 3 or l_idx < i) continue;
-            try r.join(ally, &chunk.rooms[l_idx - 3], room_bounds);
+            try room_connector.join(r, &chunk.rooms[l_idx - 3]);
         }
     }
 }

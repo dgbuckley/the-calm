@@ -129,48 +129,173 @@ fn step(pos: Pos, dir: Direction, step_length: i32) Pos {
     }
 }
 
-pub fn check_collision(room: *const Room, target: Pos, clearance: isize) bool {
-    return (target.x >= room.pos.x - clearance and target.x < room.pos.x + room.width + clearance) and
-        (target.y >= room.pos.y - clearance and target.y < room.pos.y + room.height + clearance);
-}
+pub const Connector = struct {
+    ally: Allocator,
+    bounds: std.AutoHashMapUnmanaged(Pos, void),
+    hallways: std.AutoHashMapUnmanaged(Pos, void),
 
-pub const RoomBounds = struct {
-    clearance: isize,
-    bound_positions: std.AutoHashMap(Pos, void),
-
-    pub fn init(ally: Allocator, clearance: isize) RoomBounds {
-        return RoomBounds{
-            .clearance = clearance,
-            .bound_positions = std.AutoHashMap(Pos, void).init(ally),
+    pub fn init(ally: Allocator, rooms: []const Room) !Connector {
+        var con = Connector{
+            .ally = ally,
+            .bounds = std.AutoHashMapUnmanaged(Pos, void){},
+            .hallways = std.AutoHashMapUnmanaged(Pos, void){},
         };
+        for (rooms) |r| try con.addBounds(r);
+        return con;
     }
 
-    pub fn deinit(bounds: *RoomBounds) void {
-        bounds.bound_positions.deinit();
+    pub fn deinit(con: *Connector) void {
+        con.bounds.deinit(con.ally);
+        con.hallways.deinit(con.ally);
     }
 
-    pub fn addBounds(bounds: *RoomBounds, room: *const Room) error{OutOfMemory}!void {
+    const CLEARANCE: isize = 1;
+    // add the bounds from the given room
+    fn addBounds(con: *Connector, room: Room) error{OutOfMemory}!void {
         // iterate though walls starting at bottom left corner going clockwise
-        var cur_pos: Pos = Pos{ .x = room.pos.x - bounds.clearance, .y = room.pos.y - bounds.clearance };
+        var cur_pos: Pos = Pos{ .x = room.pos.x - CLEARANCE, .y = room.pos.y - CLEARANCE };
 
-        try bounds.bound_positions.put(cur_pos, {});
+        try con.bounds.put(con.ally, cur_pos, {});
 
         // vertical walls
-        var index: isize = room.pos.y - bounds.clearance;
-        while (index < room.pos.y + room.height + bounds.clearance) : (index += 1) {
-            try bounds.bound_positions.put(Pos{ .x = room.pos.x - bounds.clearance, .y = index }, {});
-            try bounds.bound_positions.put(Pos{ .x = room.pos.x + room.width - 1 + bounds.clearance, .y = index }, {});
+        var index: isize = room.pos.y - CLEARANCE;
+        while (index < room.pos.y + room.height + CLEARANCE) : (index += 1) {
+            try con.bounds.put(con.ally, Pos{ .x = room.pos.x - CLEARANCE, .y = index }, {});
+            try con.bounds.put(con.ally, Pos{ .x = room.pos.x + room.width - 1 + CLEARANCE, .y = index }, {});
         }
         // horizontal wall
-        index = room.pos.x - bounds.clearance;
-        while (index < room.pos.x + room.width + bounds.clearance) : (index += 1) {
-            try bounds.bound_positions.put(Pos{ .x = index, .y = room.pos.y - bounds.clearance }, {});
-            try bounds.bound_positions.put(Pos{ .x = index, .y = room.pos.y + room.height - 1 + bounds.clearance }, {});
+        index = room.pos.x - CLEARANCE;
+        while (index < room.pos.x + room.width + CLEARANCE) : (index += 1) {
+            try con.bounds.put(con.ally, Pos{ .x = index, .y = room.pos.y - CLEARANCE }, {});
+            try con.bounds.put(con.ally, Pos{ .x = index, .y = room.pos.y + room.height - 1 + CLEARANCE }, {});
         }
     }
 
-    pub fn checkCollision(bounds: RoomBounds, target: Pos) bool {
-        return bounds.bound_positions.get(target) != null;
+    // Checks for a collision of any boundry
+    fn checkCollision(con: Connector, target: Pos) bool {
+        return con.bounds.get(target) != null;
+    }
+
+    pub fn join(con: *Connector, from: *Room, to: *Room) !void {
+        const from_walls = from.closestWall(to.center());
+        const to_walls = to.closestWall(from.center());
+
+        const from_wall = Room.select_wall(from_walls);
+        const to_wall = Room.select_wall(to_walls);
+
+        // TODO select a more random point on the wall
+        // from_pos is the center of from_wall
+        const from_pos = blk: {
+            var from_pos = Pos{
+                .x = @divFloor(from_wall.line.points[0].x + from_wall.line.points[1].x, @as(isize, 2)),
+                .y = @divFloor(from_wall.line.points[0].y + from_wall.line.points[1].y, @as(isize, 2)),
+            };
+
+            from_pos = step(from_pos, from_wall.direction, 2);
+
+            break :blk from_pos;
+        };
+
+        const to_pos = blk: {
+            var to_pos = Pos{
+                .x = @divFloor(to_wall.line.points[0].x + to_wall.line.points[1].x, @as(isize, 2)),
+                .y = @divFloor(to_wall.line.points[0].y + to_wall.line.points[1].y, @as(isize, 2)),
+            };
+            to_pos = step(to_pos, to_wall.direction, 2);
+            break :blk to_pos;
+        };
+
+        // path find
+
+        // var DirectionWeights[@enumToInt(dir)] = dir;
+
+        var openNodes = std.ArrayList(Node).init(con.ally);
+        var closedNodes = std.AutoHashMap(Pos, usize).init(con.ally);
+
+        // Create node for initial position and imediatly close it
+        try openNodes.append(Node{ .pos = from_pos, .G_cost = 0, .H_cost = from_pos.manhattan_dist(to_pos), .open = true, .dir_from = from_wall.direction.opposite() });
+        try con.closeNode(0, &openNodes, &closedNodes, to_pos);
+
+        var current_index: usize = 0;
+
+        while (openNodes.items[current_index].pos.x != to_pos.x or openNodes.items[current_index].pos.y != to_pos.y) {
+            // Find open node with smallest F_cost (G_cost + H_cost  or  distince to end node + distance from start node)
+            var smallest_F_cost: usize = std.math.maxInt(u32);
+            var selected_index: usize = 0;
+            for (openNodes.items) |node, i| {
+                if (!node.open) continue;
+                if (node.G_cost + node.H_cost < smallest_F_cost) {
+                    smallest_F_cost = node.G_cost + node.H_cost;
+                    selected_index = i;
+                }
+            }
+            current_index = selected_index;
+            try con.closeNode(current_index, &openNodes, &closedNodes, to_pos);
+        }
+
+        // Build hallway going from to_pos to from_pos
+
+        var hall: *Hall = try con.ally.create(Hall);
+        hall.* = .{ .segments = .{} };
+        try to.halls.append(con.ally, hall);
+        try from.halls.append(con.ally, hall);
+
+        // add entrace on to_wall
+        try hall.segments.append(con.ally, .{ .kind = Hall.get_entrance_type(to_wall.direction), .pos = step(to_pos, to_wall.direction.opposite(), 2) });
+
+        // Add turns taken by path
+        var prev_dir: Direction = to_wall.direction;
+        var cur_pos: Pos = to_pos;
+        var cur_node = openNodes.items[
+            closedNodes.get(cur_pos) orelse @panic("Unable to find node at to_pos")
+        ];
+
+        while (cur_pos.x != from_pos.x or cur_pos.y != from_pos.y) {
+            if (cur_node.dir_from != prev_dir)
+                try hall.segments.append(con.ally, .{ .kind = Hall.get_corner_type(prev_dir, cur_node.dir_from), .pos = cur_pos });
+
+            prev_dir = cur_node.dir_from;
+            cur_pos = step(cur_pos, cur_node.dir_from, 1);
+            cur_node = openNodes.items[
+                closedNodes.get(cur_pos) orelse @panic("Unable to find node for position")
+            ];
+        }
+
+        if (cur_node.dir_from != prev_dir and cur_node.dir_from != prev_dir.opposite())
+            try hall.segments.append(con.ally, .{ .kind = Hall.get_corner_type(prev_dir, cur_node.dir_from), .pos = cur_pos });
+
+        // Add entrace on from_wall
+        try hall.segments.append(con.ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = step(from_pos, from_wall.direction.opposite(), 2) });
+    }
+
+    pub fn closeNode(con: *Connector, node_index: usize, openNodes: *std.ArrayList(Node), closedNodes: *std.AutoHashMap(Pos, usize), to_pos: Pos) error{OutOfMemory}!void {
+        var dir: Direction = .Left;
+        var n: Pos = Pos{ .x = 0, .y = 0 };
+        var i: u32 = 0;
+        // Iterate through each neighbor of current node
+        while (i < 4) : (i += 1) {
+            dir = @intToEnum(Direction, i);
+            n = step(openNodes.items[node_index].pos, dir, 1);
+            // Skip if neighbor already closed
+            if (closedNodes.get(n) != null) continue;
+            if (con.checkCollision(n)) continue;
+            for (openNodes.items) |_, j| {
+                // Ensure node is the current neighbor
+                if (openNodes.items[j].pos.x != n.x or openNodes.items[j].pos.y != n.y) continue; // Filter out nodes not at pos n
+                std.debug.assert(openNodes.items[j].open); // Node should've alread been tested for being closed
+
+                if (openNodes.items[j].G_cost > openNodes.items[node_index].G_cost + 1) {
+                    openNodes.items[j].G_cost = openNodes.items[node_index].G_cost + 1;
+                    openNodes.items[j].dir_from = dir.opposite();
+                }
+                break;
+            } else {
+                try openNodes.append(Node{ .pos = n, .G_cost = openNodes.items[node_index].G_cost + 1, .H_cost = n.manhattan_dist(to_pos), .open = true, .dir_from = dir.opposite() });
+            }
+        }
+        // Set current node to closed
+        openNodes.items[node_index].open = false;
+        try closedNodes.put(openNodes.items[node_index].pos, node_index);
     }
 };
 
@@ -181,125 +306,3 @@ const Node = struct {
     open: bool,
     dir_from: Direction, // Direction of which node led to this
 };
-
-pub fn closeNode(node_index: usize, openNodes: *std.ArrayList(Node), closedNodes: *std.AutoHashMap(Pos, usize), room_bounds: RoomBounds, to_pos: Pos) error{OutOfMemory}!void {
-    var dir: Direction = .Left;
-    var n: Pos = Pos{ .x = 0, .y = 0 };
-    var i: u32 = 0;
-    // Iterate through each neighbor of current node
-    while (i < 4) : (i += 1) {
-        dir = @intToEnum(Direction, i);
-        n = step(openNodes.items[node_index].pos, dir, 1);
-        // Skip if neighbor already closed
-        if (closedNodes.get(n) != null) continue;
-        if (room_bounds.checkCollision(n)) continue;
-        for (openNodes.items) |_, j| {
-            // Ensure node is the current neighbor
-            if (openNodes.items[j].pos.x != n.x or openNodes.items[j].pos.y != n.y) continue; // Filter out nodes not at pos n
-            std.debug.assert(openNodes.items[j].open); // Node should've alread been tested for being closed
-
-            if (openNodes.items[j].G_cost > openNodes.items[node_index].G_cost + 1) {
-                openNodes.items[j].G_cost = openNodes.items[node_index].G_cost + 1;
-                openNodes.items[j].dir_from = dir.opposite();
-            }
-            break;
-        } else {
-            try openNodes.append(Node{ .pos = n, .G_cost = openNodes.items[node_index].G_cost + 1, .H_cost = n.manhattan_dist(to_pos), .open = true, .dir_from = dir.opposite() });
-        }
-    }
-    // Set current node to closed
-    openNodes.items[node_index].open = false;
-    try closedNodes.put(openNodes.items[node_index].pos, node_index);
-}
-
-pub fn join(from: *Room, ally: Allocator, to: *Room, room_bounds: RoomBounds) !void {
-    const from_walls = from.closestWall(to.center());
-    const to_walls = to.closestWall(from.center());
-
-    const from_wall = Room.select_wall(from_walls);
-    const to_wall = Room.select_wall(to_walls);
-
-    // TODO select a more random point on the wall
-    // from_pos is the center of from_wall
-    const from_pos = blk: {
-        var from_pos = Pos{
-            .x = @divFloor(from_wall.line.points[0].x + from_wall.line.points[1].x, @as(isize, 2)),
-            .y = @divFloor(from_wall.line.points[0].y + from_wall.line.points[1].y, @as(isize, 2)),
-        };
-
-        from_pos = step(from_pos, from_wall.direction, 2);
-
-        break :blk from_pos;
-    };
-
-    const to_pos = blk: {
-        var to_pos = Pos{
-            .x = @divFloor(to_wall.line.points[0].x + to_wall.line.points[1].x, @as(isize, 2)),
-            .y = @divFloor(to_wall.line.points[0].y + to_wall.line.points[1].y, @as(isize, 2)),
-        };
-        to_pos = step(to_pos, to_wall.direction, 2);
-        break :blk to_pos;
-    };
-
-    // path find
-
-    // var DirectionWeights[@enumToInt(dir)] = dir;
-
-    var openNodes = std.ArrayList(Node).init(ally);
-    var closedNodes = std.AutoHashMap(Pos, usize).init(ally);
-
-    // Create node for initial position and imediatly close it
-    try openNodes.append(Node{ .pos = from_pos, .G_cost = 0, .H_cost = from_pos.manhattan_dist(to_pos), .open = true, .dir_from = from_wall.direction.opposite() });
-    try closeNode(0, &openNodes, &closedNodes, room_bounds, to_pos);
-
-    var current_index: usize = 0;
-
-    while (openNodes.items[current_index].pos.x != to_pos.x or openNodes.items[current_index].pos.y != to_pos.y) {
-        // Find open node with smallest F_cost (G_cost + H_cost  or  distince to end node + distance from start node)
-        var smallest_F_cost: usize = std.math.maxInt(u32);
-        var selected_index: usize = 0;
-        for (openNodes.items) |node, i| {
-            if (!node.open) continue;
-            if (node.G_cost + node.H_cost < smallest_F_cost) {
-                smallest_F_cost = node.G_cost + node.H_cost;
-                selected_index = i;
-            }
-        }
-        current_index = selected_index;
-        try closeNode(current_index, &openNodes, &closedNodes, room_bounds, to_pos);
-    }
-
-    // Build hallway going from to_pos to from_pos
-
-    var hall: *Hall = try ally.create(Hall);
-    hall.* = .{ .segments = .{} };
-    try to.halls.append(ally, hall);
-    try from.halls.append(ally, hall);
-
-    // add entrace on to_wall
-    try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(to_wall.direction), .pos = step(to_pos, to_wall.direction.opposite(), 2) });
-
-    // Add turns taken by path
-    var prev_dir: Direction = to_wall.direction;
-    var cur_pos: Pos = to_pos;
-    var cur_node = openNodes.items[
-        closedNodes.get(cur_pos) orelse @panic("Unable to find node at to_pos")
-    ];
-
-    while (cur_pos.x != from_pos.x or cur_pos.y != from_pos.y) {
-        if (cur_node.dir_from != prev_dir)
-            try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(prev_dir, cur_node.dir_from), .pos = cur_pos });
-
-        prev_dir = cur_node.dir_from;
-        cur_pos = step(cur_pos, cur_node.dir_from, 1);
-        cur_node = openNodes.items[
-            closedNodes.get(cur_pos) orelse @panic("Unable to find node for position")
-        ];
-    }
-
-    if (cur_node.dir_from != prev_dir and cur_node.dir_from != prev_dir.opposite())
-        try hall.segments.append(ally, .{ .kind = Hall.get_corner_type(prev_dir, cur_node.dir_from), .pos = cur_pos });
-
-    // Add entrace on from_wall
-    try hall.segments.append(ally, .{ .kind = Hall.get_entrance_type(from_wall.direction), .pos = step(from_pos, from_wall.direction.opposite(), 2) });
-}
