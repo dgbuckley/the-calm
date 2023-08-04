@@ -9,7 +9,7 @@ const Room = @import("Room.zig");
 const Chunk = @This();
 
 pos: Pos,
-rooms: std.ArrayListUnmanaged(*Room),
+rooms: []Room,
 rng: std.rand.Random,
 
 const Width: isize = 120;
@@ -18,16 +18,13 @@ const Height: isize = 120;
 pub fn init(ally: Allocator, pos: Pos, rng: std.rand.Random) Allocator.Error!*Chunk {
     std.debug.assert(@mod(pos.x, Chunk.Width) == 0 and @mod(pos.y, Chunk.Height) == 0);
     var chunk: *Chunk = try ally.create(Chunk);
-    chunk.* = .{ .pos = pos, .rooms = std.ArrayListUnmanaged(*Room){}, .rng = rng };
+    chunk.* = .{ .pos = pos, .rooms = &.{}, .rng = rng };
     try chunk.generateRooms(ally);
     return chunk;
 }
 
 pub fn deinit(chunk: *Chunk, ally: Allocator) void {
-    for (chunk.rooms.items) |room| {
-        room.deinit(ally);
-    }
-    chunk.rooms.deinit(ally);
+    ally.free(chunk.rooms);
     ally.destroy(chunk);
 }
 
@@ -35,35 +32,27 @@ const PotentialRoom = struct {
     pos: Pos,
     width: u32,
     height: u32,
-    connections: std.ArrayListUnmanaged(usize),
+    connections: std.ArrayListUnmanaged(*PotentialRoom),
 
     fn center(room: PotentialRoom) Pos {
         return .{ .x = room.pos.x + (room.width / 2), .y = room.pos.y + (room.height / 2) };
     }
 };
 
-const Point = struct {
-    // Bottom left of a room
-    p: Pos,
-    // All neighbors
-    n: std.AutoHashMapUnmanaged(usize, *Point),
-    id: usize,
-};
-
 const Triangle = struct {
     // Three points in clockwise orientation, making a traingle
-    points: [3]*Point,
-    contains: std.ArrayListUnmanaged(*Point),
+    points: [3]*PotentialRoom,
+    contains: std.ArrayListUnmanaged(*PotentialRoom),
     list: LinkedList(Triangle, "list").Node,
 
     // Three points in clockwise orientation, making a traingle
-    fn init(ally: Allocator, points: [3]*Point, contains: []const *Point) !*Triangle {
-        std.debug.assert(Pos.orientation(points[0].p, points[1].p, points[2].p) == .Clockwise);
+    fn init(ally: Allocator, points: [3]*PotentialRoom, contains: []const *PotentialRoom) !*Triangle {
+        std.debug.assert(Pos.orientation(points[0].pos, points[1].pos, points[2].pos) == .Clockwise);
 
         var t = try ally.create(Triangle);
         t.* = Triangle{
             .points = points,
-            .contains = std.ArrayListUnmanaged(*Point){},
+            .contains = std.ArrayListUnmanaged(*PotentialRoom){},
             .list = LinkedList(Triangle, "list").Node{ .next = null, .prev = null },
         };
         try t.contains.appendSlice(ally, contains);
@@ -76,16 +65,16 @@ const Triangle = struct {
         ally.destroy(t);
     }
 
-    fn is_inside(t: Triangle, p: *Point) bool {
-        const o1 = Pos.orientation(t.points[0].p, t.points[1].p, p.p);
-        const o2 = Pos.orientation(t.points[1].p, t.points[2].p, p.p);
-        const o3 = Pos.orientation(t.points[2].p, t.points[0].p, p.p);
+    fn is_inside(t: Triangle, p: *PotentialRoom) bool {
+        const o1 = Pos.orientation(t.points[0].pos, t.points[1].pos, p.pos);
+        const o2 = Pos.orientation(t.points[1].pos, t.points[2].pos, p.pos);
+        const o3 = Pos.orientation(t.points[2].pos, t.points[0].pos, p.pos);
 
         return (o1 == .Clockwise and o1 == o2 and o1 == o3);
     }
 
     // Returns true if the point is inside a circle formed by the triangles 3 points.
-    fn in_circle(tri: Triangle, p: Point) bool {
+    fn in_circle(tri: Triangle, p: PotentialRoom) bool {
         const o1 = Pos.orientation(tri.points[0].pos, tri.points[1].pos, p.pos);
         const o2 = Pos.orientation(tri.points[1].pos, tri.points[2].pos, p.pos);
         const o3 = Pos.orientation(tri.points[2].pos, tri.points[0].pos, p.pos);
@@ -105,9 +94,9 @@ const Triangle = struct {
         // [p.x,  p.x,  (p.x^2 + p.y^2),  1]
 
         const det = determinant(4, .{
-            .{ tri.points[2].p.x, tri.points[2].p.y, (std.math.pow(isize, tri.points[2].p.x, 2) + std.math.pow(isize, tri.points[2].p.y, 2)), 1 },
-            .{ tri.points[1].p.x, tri.points[1].p.y, (std.math.pow(isize, tri.points[1].p.x, 2) + std.math.pow(isize, tri.points[1].p.y, 2)), 1 },
-            .{ tri.points[0].p.x, tri.points[0].p.y, (std.math.pow(isize, tri.points[0].p.x, 2) + std.math.pow(isize, tri.points[0].p.y, 2)), 1 },
+            .{ tri.points[2].p.x, tri.points[2].pos.y, (std.math.pow(isize, tri.points[2].pos.x, 2) + std.math.pow(isize, tri.points[2].pos.y, 2)), 1 },
+            .{ tri.points[1].p.x, tri.points[1].pos.y, (std.math.pow(isize, tri.points[1].pos.x, 2) + std.math.pow(isize, tri.points[1].pos.y, 2)), 1 },
+            .{ tri.points[0].p.x, tri.points[0].pos.y, (std.math.pow(isize, tri.points[0].pos.x, 2) + std.math.pow(isize, tri.points[0].pos.y, 2)), 1 },
             .{ p.pos.x, p.pos.y, (std.math.pow(isize, p.pos.x, 2) + std.math.pow(isize, p.pos.y, 2)), 1 },
         });
         return det > 0;
@@ -147,32 +136,6 @@ fn determinant(comptime d: usize, m: [d][d]isize) isize {
     } else {
         return m[0][0];
     }
-}
-
-test "Triangle in_circle" {
-    // TODO replace usage of Pos with Point then uncomment test
-
-    // const testing = std.testing;
-    // var tri = try Triangle.init(testing.allocator, .{ Pos{ .x = -100, .y = 100 }, Pos{ .x = 100, .y = 100 }, Pos{ .x = 100, .y = -100 } }, &[_]*Point{});
-    // defer tri.deinit(testing.allocator);
-
-    // // Inside triangle, guarateed inside
-    // try testing.expect(tri.in_circle(Pos{ .x = 50, .y = 50 }));
-
-    // // Guaranteed outside by orientation
-    // try testing.expect(!tri.in_circle(Pos{ .x = 150, .y = 150 }));
-    // try testing.expect(!tri.in_circle(Pos{ .x = -200, .y = 150 }));
-    // try testing.expect(!tri.in_circle(Pos{ .x = 150, .y = -200 }));
-
-    // // Outside triangle, inside circle
-    // try testing.expect(tri.in_circle(Pos{ .x = -50, .y = -50 }));
-    // try testing.expect(tri.in_circle(Pos{ .x = 110, .y = 0 }));
-    // try testing.expect(tri.in_circle(Pos{ .x = 0, .y = 110 }));
-
-    // // Outside
-    // try testing.expect(!tri.in_circle(Pos{ .x = -200, .y = -200 }));
-    // try testing.expect(!tri.in_circle(Pos{ .x = 200, .y = 0 }));
-    // try testing.expect(!tri.in_circle(Pos{ .x = 0, .y = 200 }));
 }
 
 fn LinkedList(comptime T: type, comptime node_field_name: []const u8) type {
@@ -216,155 +179,145 @@ fn LinkedList(comptime T: type, comptime node_field_name: []const u8) type {
                     next.prev = after;
                 }
                 self.next = after;
+                after.prev = self;
 
                 return self;
+            }
+
+            fn first(node: *Node) *Node {
+                var n = node;
+                while (n.prev) |prev| : (n = prev) {}
+                return n;
             }
         };
     };
 }
 
-fn halls_from_points(ally: Allocator, point: *Point, room_map: [ROOMS]?*Room) !void {
-    var bounds = Room.RoomBounds.init(ally, 1);
-    defer bounds.deinit();
-    for (room_map) |r| {
-        if (r == null) continue;
-        try bounds.addBounds(r.?);
-    }
-
-    var neighbors = blk: {
-        var it = point.n.iterator();
-        var list = std.ArrayListUnmanaged(*Point){};
-        while (it.next()) |n| {
-            _ = n.value_ptr.*.n.remove(point.id);
-            try list.append(ally, n.value_ptr.*);
-        }
-        break :blk list.toOwnedSlice(ally);
-    };
-    point.n.clearAndFree(ally);
-
-    for (neighbors) |n| {
-        if (n.id == std.math.maxInt(usize)) continue;
-        try room_map[point.id].?.join(ally, room_map[n.id].?, bounds);
-        try halls_from_points(ally, n, room_map);
-    }
+fn indexOf(comptime T: type, ptr: *T, start_ptr: *T) usize {
+    return @divExact((@ptrToInt(ptr) - @ptrToInt(start_ptr)), @sizeOf(T));
 }
 
 const ROOMS = 6;
 fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
+    var potential_rooms = blk: {
+        var potential_rooms = std.ArrayList(PotentialRoom).init(ally);
+        // TODO add randomness to ROOMS
+        try potential_rooms.ensureTotalCapacity(ROOMS);
 
-    // room_store stores the rooms in memory
-    var room_store: [ROOMS]PotentialRoom = undefined;
+        potential_rooms.appendSlice(&[_]PotentialRoom{
+            .{ .width = 0, .height = 0, .pos = .{ .x = chunk.pos.x - Height - 1, .y = chunk.pos.y - 1 }, .connections = undefined },
+            .{ .width = 0, .height = 0, .pos = .{ .x = chunk.pos.x + Width / 2, .y = chunk.pos.y + Height + Width / 2 + 1 }, .connections = undefined },
+            .{ .width = 0, .height = 0, .pos = .{ .x = chunk.pos.x + Width + Height, .y = chunk.pos.y - 1 }, .connections = undefined },
+        }) catch unreachable;
 
-    // generate 50 random rooms
-    for (room_store) |*room| {
-        const width = chunk.rng.intRangeAtMost(u32, 8, 15);
-        const height = chunk.rng.intRangeAtMost(u32, 8, 15);
-        const x = chunk.rng.intRangeAtMost(isize, chunk.pos.x, chunk.pos.x + Width - @as(isize, width) - 1);
-        const y = chunk.rng.intRangeAtMost(isize, chunk.pos.y, chunk.pos.y + Height - @as(isize, height) - 1);
+        // generate rooms
+        var i: usize = 0;
+        while (i < ROOMS) : (i += 1) {
+            const width = chunk.rng.intRangeAtMost(u32, 8, 15);
+            const height = chunk.rng.intRangeAtMost(u32, 8, 15);
+            potential_rooms.append(.{
+                .pos = .{
+                    .x = chunk.rng.intRangeAtMost(isize, chunk.pos.x, chunk.pos.x + Width - @as(isize, width) - 1),
+                    .y = chunk.rng.intRangeAtMost(isize, chunk.pos.y, chunk.pos.y + Height - @as(isize, height) - 1),
+                },
+                .width = width,
+                .height = height,
+                .connections = std.ArrayListUnmanaged(*PotentialRoom){},
+            }) catch unreachable;
+        }
 
-        room.* = PotentialRoom{
-            .pos = .{ .x = x, .y = y },
-            .width = width,
-            .height = height,
-            .connections = std.ArrayListUnmanaged(usize){},
-        };
-    }
+        // remove intersecting rooms
+        var j: usize = 3;
+        while (j < potential_rooms.items.len) : (j += 1) {
+            var k: usize = j + 1;
+            while (k < potential_rooms.items.len) : (k += 1) {
+                var room = potential_rooms.items[j];
+                var other = potential_rooms.items[k];
 
-    // Use optional pointers to eliminate rooms
-    var rooms: [ROOMS + 3]?Point = undefined;
-    for (rooms[3..]) |*room, i| {
-        room.* = Point{ .id = i, .p = room_store[i].pos, .n = .{} };
-    }
-    // Add Bounding points fully encompasing chunck in triangle
-    rooms[0] = Point{ .p = Pos{ .x = chunk.pos.x - Height - 1, .y = chunk.pos.y - 1 }, .id = std.math.maxInt(usize), .n = .{} };
-    rooms[1] = Point{ .p = Pos{ .x = chunk.pos.x + Width / 2, .y = chunk.pos.y + Height + Width / 2 + 1 }, .id = std.math.maxInt(usize), .n = .{} };
-    rooms[2] = Point{ .p = Pos{ .x = chunk.pos.x + Width + Height, .y = chunk.pos.y - 1 }, .id = std.math.maxInt(usize), .n = .{} };
-
-    for (rooms[3..]) |maybe_room, i| {
-        var room = room_store[maybe_room.?.id];
-        for (rooms[3 + i + 1 ..]) |maybe_r| {
-            if (maybe_r == null) continue;
-            var r = room_store[maybe_r.?.id];
-
-            const gap: isize = 6;
-            if (r.pos.y < room.pos.y + room.height + gap and r.pos.x < room.pos.x + room.width + gap and r.pos.y + r.height + gap > room.pos.y and r.pos.x + r.width + gap > room.pos.x) {
-                rooms[i + 3] = null;
-                break;
+                const gap = 6;
+                if (other.pos.y < room.pos.y + room.height + gap and other.pos.x < room.pos.x + room.width + gap and other.pos.y + other.height + gap > room.pos.y and other.pos.x + other.width + gap > room.pos.x) {
+                    _ = potential_rooms.orderedRemove(k);
+                }
             }
         }
-    }
 
-    var triangle_buf = std.heap.ArenaAllocator.init(ally);
-    defer triangle_buf.deinit();
+        break :blk potential_rooms.toOwnedSlice();
+    };
+
+    // Construct list of pointers to potential rooms for passing between triangles and building rooms
+    var room_pointers = try ally.alloc(*PotentialRoom, potential_rooms.len);
+    for (potential_rooms) |*room, i| room_pointers[i] = room;
 
     var triangles = LinkedList(Triangle, "list"){ .head = null };
-
-    var bounds = try Triangle.init(triangle_buf.allocator(), [3]*Point{ &rooms[0].?, &rooms[1].?, &rooms[2].? }, &.{});
-    for (rooms[3..]) |*p| {
-        if (p.* == null) continue;
-        std.debug.assert(bounds.is_inside(&p.*.?));
-        try bounds.contains.append(ally, &p.*.?);
-    }
-
+    var bounds = try Triangle.init(ally, .{ room_pointers[0], room_pointers[1], room_pointers[2] }, &.{});
+    try bounds.contains.appendSlice(ally, room_pointers[3..]);
     triangles.insert(&bounds.list);
 
-    var point = bounds.contains.pop();
     var tri = bounds;
     loop: while (true) {
-        var t1 = try Triangle.init(triangle_buf.allocator(), .{ tri.points[0], tri.points[1], point }, &.{});
-        var t2 = try Triangle.init(triangle_buf.allocator(), .{ tri.points[1], tri.points[2], point }, &.{});
-        var t3 = try Triangle.init(triangle_buf.allocator(), .{ tri.points[2], tri.points[0], point }, &.{});
+        // Set p to point in tri
+        var p = tri.contains.items[0];
+        // Create three triangle formed from the points of tri and p
+        var t1 = try Triangle.init(ally, .{ tri.points[0], tri.points[1], p }, &.{});
+        var t2 = try Triangle.init(ally, .{ tri.points[1], tri.points[2], p }, &.{});
+        var t3 = try Triangle.init(ally, .{ tri.points[2], tri.points[0], p }, &.{});
         _ = tri.list.insert_after(&t1.list);
         _ = tri.list.insert_after(&t2.list);
         _ = tri.list.insert_after(&t3.list);
 
-        // move all points into the new triangles
-        for ([_]*Triangle{ t1, t2, t3 }) |t| {
-            for (t.points) |p, i| {
-                var p1 = t.points[(i + 1) % 3];
-                var p2 = t.points[(i + 2) % 3];
-
-                try p.n.put(ally, p1.id, p1);
-                try p.n.put(ally, p2.id, p2);
-            }
-
-            for (tri.contains.items) |p| {
-                // Can be optimized by no running oriantation for each point more than just on each newly created line
-                if (t.is_inside(p)) try t.contains.append(ally, p);
+        // Copy points contained withing tri, to one of the newly created triangles which contains it
+        for (tri.contains.items) |r| {
+            if (r == p) continue;
+            inline for ([_]*Triangle{ t1, t2, t3 }) |t| {
+                if (t.is_inside(r)) try t.contains.append(ally, r);
             }
         }
 
-        // TODO check for delaunay and swap if needed
+        // Build connections between p at points of parent triangle going both ways
+        var i: usize = 0;
+        while (i < 3) : (i += 1) {
+            try p.connections.append(ally, tri.points[i]);
+            try tri.points[i].connections.append(ally, p);
+        }
 
         var old = tri;
-        defer old.deinit(triangle_buf.allocator());
-        tri = if (tri.list.next) |t| t.data() else break;
-        point = tri.contains.popOrNull() orelse blk: {
-            var n = tri.list.next;
-            while (n) |next_node| : (n = next_node.next) {
-                var next = next_node.data();
-                var p = next.contains.popOrNull() orelse continue;
-                tri = next;
-                break :blk p;
-            } else break :loop;
+        // defer old.deinit(ally);
+        defer old.deinit(ally);
+
+        // Get new tri as first triangle from list containing points. If none have points, return.
+        var tri_n = tri.list.next;
+        while (tri_n) |n| : (tri_n = n.next) {
+            if (n.data().contains.items.len > 0) {
+                tri = n.data();
+                break;
+            }
+        } else break :loop;
+    }
+
+    // Generate rooms and bounds
+    var room_bounds = Room.RoomBounds.init(ally, 1);
+    defer room_bounds.deinit();
+    chunk.rooms = try ally.alloc(Room, potential_rooms.len - 3);
+    for (chunk.rooms) |*r, i| {
+        var room = potential_rooms[i + 3];
+
+        r.* = .{
+            .pos = room.pos,
+            .width = room.width,
+            .height = room.height,
+            .halls = .{},
         };
+        try room_bounds.addBounds(r);
     }
 
-    var room_map: [ROOMS]?*Room = .{null} ** ROOMS;
-    for (rooms[3..]) |mp| {
-        if (mp == null) continue;
-        var p = mp.?;
-
-        var r = try Room.init(ally, p.p, room_store[p.id].width, room_store[p.id].height);
-        try chunk.rooms.append(ally, r);
-        room_map[p.id] = r;
+    // Connect together chunk rooms based on potential rooms connections
+    // Assumed potential room connections are two way
+    for (chunk.rooms) |*r, i| {
+        var room = potential_rooms[i + 3];
+        for (room.connections.items) |l| {
+            const l_idx = indexOf(PotentialRoom, l, &potential_rooms[0]);
+            if (l_idx < 3 or l_idx < i) continue;
+            try r.join(ally, &chunk.rooms[l_idx - 3], room_bounds);
+        }
     }
-
-    var node: ?Point = blk: {
-        for (rooms[3..]) |mp| {
-            if (mp) |p| break :blk p;
-        } else break :blk null;
-    };
-
-    if (node) |*n| try halls_from_points(ally, n, room_map);
 }

@@ -273,7 +273,7 @@ pub const GameMapView = struct {
     pub fn draw(game: GameMapView, ctx: Context) void {
         var win = Window{ .ctx = ctx, .pos = game.pos };
         for (game.game.active_chunks.items) |c| {
-            for (c.rooms.items) |room| {
+            for (c.rooms) |room| {
                 room.draw(&win);
             }
         }
