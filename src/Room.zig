@@ -171,6 +171,46 @@ pub fn check_collision(room: *const Room, target: Pos, clearance: isize) bool {
         (target.y >= room.pos.y - clearance and target.y < room.pos.y + room.height + clearance);
 }
 
+pub const RoomBounds = struct {
+    clearance: isize,
+    bound_positions: std.AutoHashMap(Pos, void),
+
+    pub fn init(ally: Allocator, clearance: isize) RoomBounds {
+        return RoomBounds{
+            .clearance = clearance,
+            .bound_positions = std.AutoHashMap(Pos, void).init(ally),
+        };
+    }
+
+    pub fn deinit(bounds: *RoomBounds) void {
+        bounds.bound_positions.deinit();
+    }
+
+    pub fn addBounds(bounds: *RoomBounds, room: *const Room) error{OutOfMemory}!void {
+        // iterate though walls starting at bottom left corner going clockwise
+        var cur_pos: Pos = Pos{ .x = room.pos.x - bounds.clearance, .y = room.pos.y - bounds.clearance };
+
+        try bounds.bound_positions.put(cur_pos, {});
+
+        // vertical walls
+        var index: isize = room.pos.y - bounds.clearance;
+        while (index < room.pos.y + room.height + bounds.clearance) : (index += 1) {
+            try bounds.bound_positions.put(Pos{ .x = room.pos.x - bounds.clearance, .y = index }, {});
+            try bounds.bound_positions.put(Pos{ .x = room.pos.x + room.width - 1 + bounds.clearance, .y = index }, {});
+        }
+        // horizontal wall
+        index = room.pos.x - bounds.clearance;
+        while (index < room.pos.x + room.width + bounds.clearance) : (index += 1) {
+            try bounds.bound_positions.put(Pos{ .x = index, .y = room.pos.y - bounds.clearance }, {});
+            try bounds.bound_positions.put(Pos{ .x = index, .y = room.pos.y + room.height - 1 + bounds.clearance }, {});
+        }
+    }
+
+    pub fn checkCollision(bounds: RoomBounds, target: Pos) bool {
+        return bounds.bound_positions.get(target) != null;
+    }
+};
+
 const Node = struct {
     pos: Pos,
     G_cost: usize, // Distance from starting node
@@ -179,7 +219,7 @@ const Node = struct {
     dir_from: Direction, // Direction of which node led to this
 };
 
-pub fn close_node(node_index: usize, openNodes: *std.ArrayList(Node), closedNodes: *std.AutoHashMap(Pos, usize), to_pos: Pos) error{OutOfMemory}!void {
+pub fn closeNode(node_index: usize, openNodes: *std.ArrayList(Node), closedNodes: *std.AutoHashMap(Pos, usize), room_bounds: RoomBounds, to_pos: Pos) error{OutOfMemory}!void {
     var dir: Direction = .Left;
     var n: Pos = Pos{ .x = 0, .y = 0 };
     var i: u32 = 0;
@@ -189,6 +229,7 @@ pub fn close_node(node_index: usize, openNodes: *std.ArrayList(Node), closedNode
         n = step(openNodes.items[node_index].pos, dir, 1);
         // Skip if neighbor already closed
         if (closedNodes.get(n) != null) continue;
+        if (room_bounds.checkCollision(n)) continue;
         for (openNodes.items) |_, j| {
             // Ensure node is the current neighbor
             if (openNodes.items[j].pos.x != n.x or openNodes.items[j].pos.y != n.y) continue; // Filter out nodes not at pos n
@@ -208,7 +249,7 @@ pub fn close_node(node_index: usize, openNodes: *std.ArrayList(Node), closedNode
     try closedNodes.put(openNodes.items[node_index].pos, node_index);
 }
 
-pub fn join(from: *Room, ally: Allocator, to: *Room) !void {
+pub fn join(from: *Room, ally: Allocator, to: *Room, room_bounds: RoomBounds) !void {
     // select from wall,
     // select point on from wall,
     // select to wall,
@@ -251,7 +292,7 @@ pub fn join(from: *Room, ally: Allocator, to: *Room) !void {
 
     // Create node for initial position and imediatly close it
     try openNodes.append(Node{ .pos = from_pos, .G_cost = 0, .H_cost = from_pos.manhattan_dist(to_pos), .open = true, .dir_from = from_wall.direction.opposite() });
-    try close_node(0, &openNodes, &closedNodes, to_pos);
+    try closeNode(0, &openNodes, &closedNodes, room_bounds, to_pos);
 
     var current_index: usize = 0;
 
@@ -267,7 +308,7 @@ pub fn join(from: *Room, ally: Allocator, to: *Room) !void {
             }
         }
         current_index = selected_index;
-        try close_node(current_index, &openNodes, &closedNodes, to_pos);
+        try closeNode(current_index, &openNodes, &closedNodes, room_bounds, to_pos);
     }
 
     // Build hallway going from to_pos to from_pos

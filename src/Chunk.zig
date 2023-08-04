@@ -224,6 +224,13 @@ fn LinkedList(comptime T: type, comptime node_field_name: []const u8) type {
 }
 
 fn halls_from_points(ally: Allocator, point: *Point, room_map: [ROOMS]?*Room) !void {
+    var bounds = Room.RoomBounds.init(ally, 1);
+    defer bounds.deinit();
+    for (room_map) |r| {
+        if (r == null) continue;
+        try bounds.addBounds(r.?);
+    }
+
     var neighbors = blk: {
         var it = point.n.iterator();
         var list = std.ArrayListUnmanaged(*Point){};
@@ -237,7 +244,7 @@ fn halls_from_points(ally: Allocator, point: *Point, room_map: [ROOMS]?*Room) !v
 
     for (neighbors) |n| {
         if (n.id == std.math.maxInt(usize)) continue;
-        try room_map[point.id].?.join(ally, room_map[n.id].?);
+        try room_map[point.id].?.join(ally, room_map[n.id].?, bounds);
         try halls_from_points(ally, n, room_map);
     }
 }
