@@ -60,94 +60,57 @@ fn center(room: Room) Pos {
 const Wall = struct {
     direction: Direction,
     line: Line,
+    center: Pos,
+
+    fn init(direction: Direction, line: Line) Wall {
+        return .{
+            .direction = direction,
+            .line = line,
+            .center = lineCenter(direction, line),
+        };
+    }
+
+    fn lineCenter(direction: Direction, line: Line) Pos {
+        return switch (direction) {
+            .Left, .Right => .{ .x = line.points[0].x, .y = @divTrunc(line.points[0].y - line.points[1].y, 2) },
+            .Up, .Down => .{ .y = line.points[0].y, .x = @divTrunc(line.points[0].x - line.points[1].x, 2) },
+        };
+    }
 };
 
 // Returns wall forming select side of room, wall points are garanteed to run clockwise
 fn get_wall(room: *const Room, direction: Direction) Wall {
     switch (direction) {
-        .Left => return .{ .direction = direction, .line = Line.init(room.pos, .{ .x = room.pos.x, .y = room.pos.y + room.height - 1 }) },
-        .Right => return .{ .direction = direction, .line = Line.init(.{ .x = room.pos.x + room.width - 1, .y = room.pos.y + room.height - 1 }, .{ .x = room.pos.x + room.width - 1, .y = room.pos.y }) },
-        .Up => return .{ .direction = direction, .line = Line.init(.{ .x = room.pos.x, .y = room.pos.y + room.height - 1 }, .{ .x = room.pos.x + room.width - 1, .y = room.pos.y + room.height - 1 }) },
-        .Down => return .{ .direction = direction, .line = Line.init(.{ .x = room.pos.x + room.width - 1, .y = room.pos.y }, room.pos) },
+        .Down => return Wall.init(direction, Line.init(.{ .x = room.pos.x + room.width - 1, .y = room.pos.y }, room.pos)),
+        .Left => return Wall.init(direction, Line.init(room.pos, .{ .x = room.pos.x, .y = room.pos.y + room.height - 1 })),
+        .Right => return Wall.init(direction, Line.init(.{ .x = room.pos.x + room.width - 1, .y = room.pos.y + room.height - 1 }, .{ .x = room.pos.x + room.width - 1, .y = room.pos.y })),
+        .Up => return Wall.init(direction, Line.init(.{ .x = room.pos.x, .y = room.pos.y + room.height - 1 }, .{ .x = room.pos.x + room.width - 1, .y = room.pos.y + room.height - 1 })),
     }
 }
 
-// clorest_walls returns an array of walls where the first item (index 0) is the closest wall to the target
-fn closest_walls(room: *const Room, target: Pos) [4]Wall {
-    const room_center = room.center();
-    // Get walls for each side of room, defined clockwise
+fn wallLessThan(target: Pos, a: Wall, b: Wall) bool {
+    return target.manhattan_dist(a.center) > target.manhattan_dist(b.center);
+}
+
+// Return a list of walls sorted by distance from target with wall[0] being the closest
+fn closestWall(room: Room, target: Pos) [4]Wall {
     var room_walls = [4]Wall{
         room.get_wall(.Up),
         room.get_wall(.Right),
         room.get_wall(.Down),
         room.get_wall(.Left),
-
-        // Line.init(room.pos, .{ .x = room.pos.x + room.width, .y = room.pos.y }),
-        // Line.init(room.pos, .{ .x = room.pos.x, .y = room.pos.y + room.height }),
-        // Line.init(.{ .x = room.pos.x + room.width, .y = room.pos.y }, .{ .x = room.pos.x + room.width, .y = room.pos.y + room.height }),
-        // Line.init(.{ .x = room.pos.x, .y = room.pos.y + room.height }, .{ .x = room.pos.x + room.width, .y = room.pos.y + room.height }),
     };
 
-    var walls: [4]Wall = undefined;
-
-    const y_diff = target.y - room_center.y;
-    const x_diff = target.x - room_center.x;
-
-    // Peppendicular isn't the best way to check for walls, best bet would be to use direction after finding the closest.
-    const perpendicular_a = Line.init(room_center, .{ .x = room_center.x - y_diff * 10, .y = room_center.y + x_diff * 10 });
-    _ = perpendicular_a;
-    const perpendicular_b = Line.init(.{ .x = room_center.x + y_diff * 10, .y = room_center.y - x_diff * 10 }, room_center);
-    _ = perpendicular_b;
-
-    var main_wall_idx: usize = 0;
-    for (room_walls) |wall, i| {
-        if (wall.line.intersects(Line.init(room_center, target))) {
-            walls[0] = wall;
-            main_wall_idx = i;
-
-            //     // get clockwise
-            //     // get counter
-            //     // get opposite
-            // } else if (wall.line.intersects(perpendicular_a)) {
-            //     walls[1] = wall;
-            // } else if (wall.line.intersects(perpendicular_b)) {
-            //     walls[2] = wall;
-            // } else {
-            //     walls[3] = wall;
-            // }
-            break;
-        }
-    } else {
-        @panic("No walls found");
-    }
-
-    var pev_wall = if (main_wall_idx > 0) room_walls[main_wall_idx - 1] else room_walls[3];
-    var next_wall = if (main_wall_idx < 3) room_walls[main_wall_idx + 1] else room_walls[0];
-
-    var prev_dist = target.manhattan_dist(pev_wall.line.points[1]);
-    var next_dist = target.manhattan_dist(next_wall.line.points[0]);
-
-    if (prev_dist < next_dist) {
-        walls[1] = pev_wall;
-        walls[2] = next_wall;
-    } else {
-        walls[1] = next_wall;
-        walls[2] = pev_wall;
-    }
-
-    // Wall behind intersected wall is always assumed furthest.
-    var back_wall = if (main_wall_idx > 1) room_walls[main_wall_idx - 2] else room_walls[main_wall_idx + 2];
-    walls[3] = back_wall;
-
-    return walls;
+    std.sort.sort(Wall, &room_walls, target, wallLessThan);
+    return room_walls;
 }
 
-// Using a weighted average of 0.5, 0.24, 0.24, 0.02, select a wall
+// Using a weighted average of 0.75, 0.15, 0.08, 0.02, select a wall
 fn select_wall(walls: [4]Wall) Wall {
-    const cumulative_sums = [4]u32{ 50, 74, 98, 100 };
+    const cumulative_sums = [4]f32{ 0.75, 0.90, 0.98, 0.100 };
 
     var rng = std.rand.DefaultPrng.init(@intCast(u64, std.time.nanoTimestamp()));
-    const rand = rng.random().intRangeAtMost(u32, 0, 99);
+    const rand = rng.random().float(f32);
 
     for (cumulative_sums) |sum, i| {
         if (rand < sum) {
@@ -250,13 +213,8 @@ pub fn closeNode(node_index: usize, openNodes: *std.ArrayList(Node), closedNodes
 }
 
 pub fn join(from: *Room, ally: Allocator, to: *Room, room_bounds: RoomBounds) !void {
-    // select from wall,
-    // select point on from wall,
-    // select to wall,
-    // select point on to wall,o
-
-    const from_walls = from.closest_walls(to.center());
-    const to_walls = to.closest_walls(from.center());
+    const from_walls = from.closestWall(to.center());
+    const to_walls = to.closestWall(from.center());
 
     const from_wall = Room.select_wall(from_walls);
     const to_wall = Room.select_wall(to_walls);
