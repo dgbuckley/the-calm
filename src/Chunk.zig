@@ -42,6 +42,7 @@ const PotentialRoom = struct {
 const Triangle = struct {
     // Three points in clockwise orientation, making a traingle
     points: [3]*PotentialRoom,
+    siblings: [3]?*Triangle,
     contains: std.ArrayListUnmanaged(*PotentialRoom),
     list: LinkedList(Triangle, "list").Node,
 
@@ -52,6 +53,7 @@ const Triangle = struct {
         var t = try ally.create(Triangle);
         t.* = Triangle{
             .points = points,
+            .siblings = .{ null, null, null },
             .contains = std.ArrayListUnmanaged(*PotentialRoom){},
             .list = LinkedList(Triangle, "list").Node{ .next = null, .prev = null },
         };
@@ -65,7 +67,7 @@ const Triangle = struct {
         ally.destroy(t);
     }
 
-    fn is_inside(t: Triangle, p: *PotentialRoom) bool {
+    fn is_inside(t: Triangle, p: PotentialRoom) bool {
         const o1 = Pos.orientation(t.points[0].pos, t.points[1].pos, p.pos);
         const o2 = Pos.orientation(t.points[1].pos, t.points[2].pos, p.pos);
         const o3 = Pos.orientation(t.points[2].pos, t.points[0].pos, p.pos);
@@ -94,9 +96,9 @@ const Triangle = struct {
         // [p.x,  p.x,  (p.x^2 + p.y^2),  1]
 
         const det = determinant(4, .{
-            .{ tri.points[2].p.x, tri.points[2].pos.y, (std.math.pow(isize, tri.points[2].pos.x, 2) + std.math.pow(isize, tri.points[2].pos.y, 2)), 1 },
-            .{ tri.points[1].p.x, tri.points[1].pos.y, (std.math.pow(isize, tri.points[1].pos.x, 2) + std.math.pow(isize, tri.points[1].pos.y, 2)), 1 },
-            .{ tri.points[0].p.x, tri.points[0].pos.y, (std.math.pow(isize, tri.points[0].pos.x, 2) + std.math.pow(isize, tri.points[0].pos.y, 2)), 1 },
+            .{ tri.points[2].pos.x, tri.points[2].pos.y, (std.math.pow(isize, tri.points[2].pos.x, 2) + std.math.pow(isize, tri.points[2].pos.y, 2)), 1 },
+            .{ tri.points[1].pos.x, tri.points[1].pos.y, (std.math.pow(isize, tri.points[1].pos.x, 2) + std.math.pow(isize, tri.points[1].pos.y, 2)), 1 },
+            .{ tri.points[0].pos.x, tri.points[0].pos.y, (std.math.pow(isize, tri.points[0].pos.x, 2) + std.math.pow(isize, tri.points[0].pos.y, 2)), 1 },
             .{ p.pos.x, p.pos.y, (std.math.pow(isize, p.pos.x, 2) + std.math.pow(isize, p.pos.y, 2)), 1 },
         });
         return det > 0;
@@ -265,11 +267,35 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
         _ = tri.list.insert_after(&t2.list);
         _ = tri.list.insert_after(&t3.list);
 
+        // Set new triangle siblings, and update adjacent triangles' siblings
+
+        // t1 Siblings
+        t1.siblings = .{ tri.siblings[0], t2, t3 };
+        if (tri.siblings[0]) |sib| {
+            for (sib.siblings) |*s| {
+                if (s.* == tri) s.* = t1;
+            }
+        }
+
+        t2.siblings = .{ tri.siblings[1], t3, t1 };
+        if (tri.siblings[1]) |sib| {
+            for (sib.siblings) |*s| {
+                if (s.* == tri) s.* = t2;
+            }
+        }
+
+        t3.siblings = .{ tri.siblings[2], t1, t2 };
+        if (tri.siblings[2]) |sib| {
+            for (sib.siblings) |*s| {
+                if (s.* == tri) s.* = t3;
+            }
+        }
+
         // Copy points contained withing tri, to one of the newly created triangles which contains it
         for (tri.contains.items) |r| {
             if (r == p) continue;
             inline for ([_]*Triangle{ t1, t2, t3 }) |t| {
-                if (t.is_inside(r)) try t.contains.append(ally, r);
+                if (t.is_inside(r.*)) try t.contains.append(ally, r);
             }
         }
 
@@ -278,6 +304,69 @@ fn generateRooms(chunk: *Chunk, ally: Allocator) !void {
         while (i < 3) : (i += 1) {
             try p.connections.append(ally, tri.points[i]);
             try tri.points[i].connections.append(ally, p);
+        }
+
+        for ([_]*Triangle{ t1, t2, t3 }) |t| {
+            if (t.siblings[0] == null) continue;
+            for (t.siblings[0].?.siblings) |s, j| {
+                if (s == t) {
+
+                    // We will replace t and t.sibling with new triangles of p2 p0 point and p1 p2 point
+                    // p0, p1, p2 are known from the oder used to create t1, t2, t3
+                    // p1 ############### p2
+                    // #  #                #
+                    // #    #         t    #
+                    // #       #           #
+                    // #          #        #
+                    // # t.sibling   #     #
+                    // #                #  #
+                    // #                  ##
+                    // point ############ p0
+                    var point = s.?.points[(j + 2) % 3];
+                    if (t.in_circle(point.*)) {
+                        var tA = try Triangle.init(ally, .{ t.points[2], t.points[0], point }, &.{});
+                        var tB = try Triangle.init(ally, .{ t.points[1], t.points[2], point }, &.{});
+
+                        // Remove all points from t and the sibling and add to the correct new triangles
+                        for (t.contains.items) |tp| {
+                            if (tA.is_inside(tp.*))
+                                try tA.contains.append(ally, tp)
+                            else
+                                // Contained inside tB
+                                try tB.contains.append(ally, tp);
+                        }
+                        for (t.siblings[0].?.contains.items) |sp| {
+                            if (tA.is_inside(sp.*))
+                                try tA.contains.append(ally, sp)
+                            else
+                                // Contained inside tB
+                                try tB.contains.append(ally, sp);
+                        }
+
+                        // t.p2 and point gain connection to each other
+                        // t.p0 and t.p1 lose connections
+                        try t.points[2].connections.append(ally, point);
+                        try point.connections.append(ally, t.points[2]);
+
+                        for (t.points[0].connections.items) |c, k| {
+                            if (c == t.points[1]) {
+                                _ = t.points[0].connections.orderedRemove(k);
+                                break;
+                            }
+                        }
+
+                        for (t.points[1].connections.items) |c, k| {
+                            if (c == t.points[0]) {
+                                _ = t.points[1].connections.orderedRemove(k);
+                                break;
+                            }
+                        }
+
+                        _ = tri.list.insert_after(&tA.list);
+                        _ = tri.list.insert_after(&tB.list);
+                    }
+                }
+            }
         }
 
         var old = tri;
